@@ -4,7 +4,8 @@ import cogamo.cogamo as cogamo
 
 
 pipe = cogamo.Pipeline()
-pipe.process_eventdata('data/012_20210108_17.csv')
+#pipe.process_eventdata('data/012_20210108_17.csv')
+pipe.process_eventdata('data/014_20210109_06.csv')
 
 #evt = cogamo.EventData('data/012_20210108_17.csv')
 #evt.extract_pha_spectrum()

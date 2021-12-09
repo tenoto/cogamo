@@ -10,7 +10,7 @@ import pandas as pd
 from astropy.time import Time
 from astropy.io import fits
 
-from datetime import timedelta, timezone
+from datetime import datetime, timedelta, timezone
 tz_tokyo = timezone(timedelta(hours=+9), 'Asia/Tokyo')
 tz_utc = timezone(timedelta(hours=0), 'UTC')
 
@@ -82,7 +82,8 @@ def plot_histogram(hist_x,hist_y,outpdf,hist_yerr=None,
 	fig, ax = plt.subplots(1,1, figsize=(11.69,8.27)) # A4 size, inich unit 
 	fontsize = 18 	
 
-	if hist_yerr != None:
+	if hist_yerr is not None:
+		plt.errorbar(hist_x,hist_y,marker='',drawstyle='steps-mid')		
 		plt.errorbar(hist_x,hist_y,yerr=hist_yerr,marker='',drawstyle='steps-mid')
 	else:
 		plt.errorbar(hist_x,hist_y,marker='',drawstyle='steps-mid')
@@ -291,13 +292,20 @@ class Pipeline():
 		# energy spectrum 
 		evt.extract_energy_spectrum(outdir=outdir)
 
-		evt.extract_curve(tbin=1.0,energy_min=3.0,energy_max=8.0)
+		evt.extract_curve(tbin=5.0,energy_min=3.0,energy_max=None,outdir=outdir)
+
+		# if burst was detected
+		#par = evt.fit_burst_curve(tbin=5.0,tstart=0.0,tstop=500.0,energy_min=3.0,energy_max=None)
+		par = evt.fit_burst_curve(tbin=5.0,tstart=0.0,tstop=500.0,energy_min=3.0,energy_max=None,outdir=outdir)		
+
+		evt.get_burst_duration(par,tbin=1.0,tstart=par['fit_xmin'],tstop=par['fit_xmax'],
+			energy_min=3.0,energy_max=None,linear_tbin_normalization=5.0,outdir=outdir)
 
 		# output 
 		output_fitsfile = '%s/%s_proc.evt' % (outdir,evt.basename)
 		evt.write_to_fitsfile(output_fitsfile=output_fitsfile,config_file=None)
 
-		yamlfile = 'param.yaml'
+		yamlfile = '%s/%s_process.yaml' % (outdir,evt.basename)
 		with open(yamlfile, "w") as wf:
 		    yaml.dump(param, wf,default_flow_style=False)	
 
@@ -392,6 +400,11 @@ class EventData():
 		self.df['unixtime'] = self.time_series_utc.to_value('unix',subfmt='decimal')
 		self.df['unixtime'] = self.df['unixtime'].astype(np.float64)
 
+		time_offset_str = str_time + '00:00'
+		time_offset_jst = Time(time_offset_str, format='isot', scale='utc', precision=5) 
+		self.time_offset_utc = time_offset_jst - timedelta(hours=+9)		
+		self.unixtime_offset = self.time_offset_utc.to_value('unix',subfmt='decimal')
+
 	def set_energy_series(self,pha2mev_c0,pha2mev_c1):		
 		""" with rand  
 		"""
@@ -467,28 +480,97 @@ class EventData():
 			legend_text=legend_text)
 		return par
 
-	def extract_curve(self,tbin=1.0,energy_min=3.0,energy_max=8.0):
+
+	def get_energy_mask(self,energy_min,energy_max):
 
 		if energy_min == None and energy_max == None:
-			sys.stdout.write("no pha selection.\n")
+			message = "no pha selection."		
 			suffix = 'mev_all' 
 			mask = np.full(len(self.df), True)
 		elif energy_min != None and energy_max == None:
-			sys.stdout.write("%d <= energy_meV" % energy_min)	
+			message = "%.1f MeV <= Energy" % energy_min
 			suffix = 'mev_%s_xx' % (str(energy_min).replace('.','p'))								
-			mask = (self.df['energy_meV'] >= energy_min)
+			mask = (self.df['energy_mev'] >= energy_min)
 		elif energy_min == None and energy_max != None:
-			sys.stdout.write("energy_meV <= %d" % energy_max)				
+			message = "Energy <= %.1f MeV" % energy_max
 			suffix = 'mev_xx_%s' % (str(energy_max).replace('.','p'))													
-			mask = (self.df['energy_meV'] <= energy_max)
+			mask = (self.df['energy_mev'] <= energy_max)
 		elif energy_min != None and energy_max != None:
-			sys.stdout.write("%d <= energy_meV <= %d" % (energy_min,energy_max))
+			message = "%.1f MeV <= Energy <= %.1f MeV" % (energy_min,energy_max)
 			suffix = 'mev_%s_%s' % (str(energy_min).replace('.','p'),str(energy_max).replace('.','p'))			
-			mask = np.logical_and((self.df['energy_meV'] >= energy_min),(self.df['energy_meV'] <= energy_max))
+			mask = np.logical_and((self.df['energy_mev'] >= energy_min),(self.df['energy_mev'] <= energy_max))
+		sys.stdout.write("%s\n" % message)
 
-		masked_df = self.df[mask]
-		time_max = 	masked_df['unixtime'][-1] - masked_df['unixtime'][0]
-		time_min = 	masked_df['unixtime'][0]
+		return mask, message, suffix 		
+
+	def extract_curve(self,tbin=1.0,tstart=0.0,tstop=3600.0,energy_min=3.0,energy_max=8.0,outdir='./'):
+		""" Energy in MeV unit
+		"""
+		mask, message, suffix = self.get_energy_mask(energy_min=energy_min,energy_max=energy_max)
+
+		lc = LightCurve(np.array(self.df[mask]['unixtime']),float(self.unixtime_offset),tbin=tbin,tstart=tstart,tstop=tstop)
+		title = '%s (%s)' % (self.basename, message)
+		outpdf = '%s/%s_lc_%s.pdf' % (outdir,self.basename,suffix)
+		lc.plot(outpdf=outpdf,title=title,xlim=[0.0,500.0])		
+
+	def fit_burst_curve(self,tbin=8.0,tstart=0.0,tstop=3600.0,energy_min=3.0,energy_max=8.0,outdir='./'):
+		""" Energy in MeV unit
+		"""
+		mask, message, suffix = self.get_energy_mask(energy_min=energy_min,energy_max=energy_max)
+
+		lc = LightCurve(np.array(self.df[mask]['unixtime']),float(self.unixtime_offset),
+			tbin=tbin,tstart=tstart,tstop=tstop)
+		title = '%s (%s)' % (self.basename, message)
+
+#		dict_par_init = {'peak':300,'sigma':10,'area':100,'c0':10,'c1':0}
+		dict_par_init = {'peak':300,'sigma':10,'area':600,'c0':14,'c1':0,'fit_xmin':200,'fit_xmax':500}
+		#dict_par_init = {'peak':300,'sigma':10,'area':600,'c0':3,'c1':0,'fit_xmin':200,'fit_xmax':500}
+		par = lc.fit_gauss_linear(dict_par_init,flag_error=True,fit_nsigma=6)
+		print("---------")
+		print(par)
+		print("---------")
+
+		model_x = lc.hist.x
+		model_y = np.array([model_gauss_linear(x,peak=par['peak'],sigma=par['sigma'],area=par['area'],
+			c0=par['c0'],c1=par['c1']) for x in model_x])	
+
+		"""
+		legend_text = '%s (fit range: %d sigma)\n' % (self.basename,par['fit_nsigma'])
+		legend_text += 'peak=%.1f+/-%.1f ch\n' % (par['peak'],par['peak_err'])
+		legend_text += 'sigma=%.1f+/-%.1f ch\n' % (par['sigma'],par['sigma_err'])		
+		legend_text += 'area=%.1f+/-%.1f counts\n' % (par['area'],par['area_err'])
+		legend_text += 'c0=%.1f+/-%.1f counts\n' % (par['c0'],par['c0_err'])		
+		legend_text += 'c1=%.1f+/-%.1f counts\n' % (par['c1'],par['c1_err'])			
+		legend_text += 'resolution=%.1f %%' % (100.0*get_energy_resolution(par['peak'],par['sigma']))
+		"""
+		legend_text = ""
+		outpdf = '%s/%s_bst_gaussfit.pdf' % (outdir,self.basename)
+		plot_fit_residual(
+			lc.hist.x,lc.hist.y,
+			model_x,model_y,			
+			outpdf=outpdf,
+			hist_xerr=lc.hist.xerr,hist_yerr=lc.hist.yerr,
+			xlabel='Channel',ylabel='Counts / (%d sec)' % tbin,
+			title=self.basename,
+			xlim=[tstart,tstop],
+			fit_xmin=par['fit_xmin'],fit_xmax=par['fit_xmax'],
+			legend_text=legend_text)
+		return par
+
+	def get_burst_duration(self,par,tbin=1.0,tstart=0.0,tstop=500.0,energy_min=3.0,energy_max=8.0,
+		linear_tbin_normalization=1.0,outdir='./'):
+
+		mask, message, suffix = self.get_energy_mask(energy_min=energy_min,energy_max=energy_max)
+
+		unixtime_series = np.array(self.df[mask]['unixtime']) - float(self.unixtime_offset)
+		lc = LightCurve(np.array(self.df[mask]['unixtime']),float(self.unixtime_offset),
+			tbin=tbin,tstart=tstart,tstop=tstop)		
+		print(unixtime_series)
+
+		outpdf = '%s/%s_accumy.pdf' % (outdir,self.basename)
+		lc.plot_accumulation(par,linear_tbin_normalization=linear_tbin_normalization,outpdf=outpdf)
+		#title = '%s (%s)' % (self.basename, message)
+		#lc.plot(outpdf='lc1.pdf',title=title,xlim=[0.0,500.0])		
 
 	def write_to_fitsfile(self,output_fitsfile=None,config_file=None,overwrite=True):
 		"""
@@ -569,8 +651,8 @@ class PhaSpectrum():
 			xlabel='ADC channel (pha)',ylabel='Counts / bin',title=title,
 			flag_xlog=False,flag_ylog=True,xlim=xlim)		
 
-	def fit_gauss_linear(self,par_init,flag_error=True):
-		par = fit_gauss_linear(self.hist.x,self.hist.y,par_init,error=self.hist.yerr)
+	def fit_gauss_linear(self,par_init,flag_error=True,fit_nsigma=3):
+		par = fit_gauss_linear(self.hist.x,self.hist.y,par_init,error=self.hist.yerr,fit_nsigma=fit_nsigma)
 		return par 
 
 class EnergySpectrum():
@@ -593,25 +675,59 @@ class EnergySpectrum():
 			xlabel='Energy (MeV)',ylabel='Counts / bin',title=title,
 			flag_xlog=False,flag_ylog=True,xlim=xlim)		
 
-class CogamoCurve():
+class LightCurve():
 	"""
 	Light curve
 	"""
-	def __init__(self,tbin=1.0):
-		self.nbins = nbins
-		self.energy_min = energy_min
-		self.energy_max = energy_max 
-		xlow = 0.0
-		xhigh = data['TIME'][-1] - data['TIME'][0]
-		nbins = round((xhigh-xlow)/tbin)
-		hist_lc = Hist1D(nbins, xlow, xhigh)
-		print(data['TIME'][mask]-data['TIME'][0])
-		hist_lc.fill(data['TIME'][mask]-data['TIME'][0])
+	def __init__(self,unixtime_series,unixtime_offset,tbin=8.0,tstart=0.0,tstop=3600.0):
+		self.unixtime_series = unixtime_series
+		self.unixtime_offset = unixtime_offset 
+		self.tbin = tbin
+		self.tstart = tstart
+		self.tstop = tstop 
 
-		fig, ax = plt.subplots(1,1, figsize=(11.69,8.27))		
-		plt.step(*hist_lc.data)
+		self.nbins = round((self.tstop - self.tstart)/self.tbin)
+		self.hist = Hist1D(nbins=self.nbins,xlow=self.tstart,xhigh=self.tstop)
+		self.hist.fill(self.unixtime_series-self.unixtime_offset)
+
+		self.time_offset_str = datetime.fromtimestamp(self.unixtime_offset)
+
+	def plot(self,outpdf,title='',xlim=[0.0,3600.0]):
+
+		plot_histogram(
+			self.hist.x,self.hist.y,
+			outpdf=outpdf,hist_yerr=self.hist.yerr,
+			xlabel='Time since %s (sec)' % self.time_offset_str,
+			ylabel='Counts / (%d sec)' % self.tbin,title=title,
+			flag_xlog=False,flag_ylog=False,xlim=xlim)	
+
+	def fit_gauss_linear(self,par_init,flag_error=True,fit_nsigma=3):
+		par = fit_gauss_linear(self.hist.x,self.hist.y,par_init,error=self.hist.yerr,fit_nsigma=fit_nsigma)
+		return par 
+
+	def plot_accumulation(self,par,linear_tbin_normalization=1.0,outpdf='accum.pdf'):
+
+		model_x = self.hist.x
+		model_y = np.array([model_linear(x,c0=par['c0'],c1=par['c1'])/linear_tbin_normalization for x in model_x])
+		#print(model_x)
+		#print(model_y)
+
+		self.hist.accum_y = (self.hist.y - model_y).cumsum()
+		#print(self.hist.accum_y)
+
+		ratio = self.hist.accum_y/self.hist.accum_y[-1]
+		at10percent = self.hist.x[ratio >= 0.1][0]
+		at90percent = self.hist.x[ratio >= 0.9][0]
+		print(at10percent,at90percent)
+		print(at90percent-at10percent)
+
+		title = 'accumulation'
+		plot_histogram(
+			self.hist.x,self.hist.accum_y,
+			outpdf=outpdf,hist_yerr=None,
+			xlabel='Time since %s (sec)' % self.time_offset_str,
+			ylabel='Number of events',title=title,
+			flag_xlog=False,flag_ylog=False,xlim=None)	
 
 
-		self.hist = Hist1D(nbins=self.nbins,xlow=self.energy_min,xhigh=self.energy_max)
-		self.hist.fill(energy_series)	
 
