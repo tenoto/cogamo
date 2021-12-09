@@ -26,6 +26,10 @@ from probfit import Chi2Regression
 
 DEFAULT_PHA_SPECTRUM_NBINS = 2**10
 
+DEFAULT_ENERGY_SPECTRUM_NBINS = 2**10
+DEFAULT_ENERGY_SPECTRUM_MIN = 0.0
+DEFAULT_ENERGY_SPECTRUM_MAX = 12.0
+
 K40_ENERGY_MEV = 1.46083
 Tl208_ENERGY_MEV = 2.61453
 
@@ -107,7 +111,8 @@ def plot_histogram(hist_x,hist_y,outpdf,hist_yerr=None,
 def plot_fit_residual(hist_x,hist_y,model_x,model_y,outpdf,
 		hist_xerr=None,hist_yerr=None,
 		xlabel='X title',ylabel='Y title',title='Title',
-		flag_xlog=False,flag_ylog=False,xlim=None):
+		flag_xlog=False,flag_ylog=False,xlim=None,
+		fit_xmin=None,fit_xmax=None,legend_text=''):
 
 	fig, axs = plt.subplots(2,1,figsize=(11.69,8.27), # A4 size, inich unit 
 		sharex=True,gridspec_kw={'hspace':0},tight_layout=True)
@@ -128,6 +133,7 @@ def plot_fit_residual(hist_x,hist_y,model_x,model_y,outpdf,
 	axs[0].set_xlim(xlim)
 	axs[0].set_title(title, fontsize=fontsize)	
 	axs[0].get_xaxis().set_visible(False)
+	axs[0].legend(title=legend_text,loc='lower left',fontsize=fontsize)
 
 	axs[1] = plt.subplot(gs[1])
 	axs[1].errorbar(hist_x,(hist_y-model_y)/model_y,yerr=hist_yerr/model_y,
@@ -144,6 +150,8 @@ def plot_fit_residual(hist_x,hist_y,model_x,model_y,outpdf,
 		#ax.grid(axis='both',which='minor', linestyle='--')	
 		ax.tick_params(axis="both", which='major', direction='in', length=5,labelsize=fontsize)
 		ax.tick_params(axis="both", which='minor', direction='in', length=3,labelsize=fontsize)
+		ax.axvline(fit_xmin,ls='--')
+		ax.axvline(fit_xmax,ls='--')
 
 	plt.savefig(outpdf)	
 
@@ -152,6 +160,58 @@ def model_gauss_linear(x, peak, sigma, area, c0=0.0, c1=0.0):
 
 def model_linear(x, c0=0.0, c1=0.0):
     return c0 + c1 * x
+
+def fit_gauss_linear(x,y,par_init,error=None,fit_nsigma=3):
+
+	if error is not None:
+		chi2reg = Chi2Regression(model_gauss_linear,x,y,error=error)
+	else:
+		chi2reg = Chi2Regression(model_gauss_linear,x,y)	
+
+	fit = Minuit(chi2reg, 
+		peak=par_init['peak'],sigma=par_init['sigma'],area=par_init['area'], 
+		c0=par_init['c0'], c1=par_init['c1'])
+	fit.migrad()
+	fit.minos() 
+	#fit.print_param()
+
+	peak = fit.values[0]
+	sigma = fit.values[1]
+	fit_xmin = peak - fit_nsigma * sigma 
+	fit_xmax = peak + fit_nsigma * sigma 
+
+	flag = np.logical_and(x >= fit_xmin, x <= fit_xmax)
+	if error is not None:
+		chi2reg = Chi2Regression(model_gauss_linear,x[flag],y[flag],error=error[flag])
+	else:
+		chi2reg = Chi2Regression(model_gauss_linear,x[flag],y[flag])
+
+	fit = Minuit(chi2reg, 
+		peak=par_init['peak'],sigma=par_init['sigma'],area=par_init['area'], 
+		c0=par_init['c0'], c1=par_init['c1'])
+	fit.migrad()
+	fit.minos() 
+	fit.print_param()
+
+	par = {
+		'peak':fit.values[0],
+		'sigma':fit.values[1],
+		'area':fit.values[2],
+		'c0':fit.values[3],
+		'c1':fit.values[4],
+		'peak_err':fit.errors[0],
+		'sigma_err':fit.errors[1],
+		'area_err':fit.errors[2],
+		'c0_err':fit.errors[3],
+		'c1_err':fit.errors[4],
+		'fit_xmin':fit_xmin,
+		'fit_xmax':fit_xmax,
+		'fit_nsigma':fit_nsigma}
+	return par
+
+def get_energy_resolution(peak,sigma):
+	# assuming the offset is zero
+	return 2.35*sigma/peak 
 
 class Hist1D(object):
 	"""Represents 1D histogram. 
@@ -198,7 +258,7 @@ class Pipeline():
 		cmd = 'mkdir -p %s' % outdir 
 		os.system(cmd)
 
-		# get energy calibration 
+		# get energy calibration informatio: two line peak channel 
 		evt.extract_pha_spectrum(outdir=outdir)
 		par_Tl208 = evt.fit_pha_spectrum_lines(dict_par_init_Tl208,outdir=outdir)
 		par_K40 = evt.fit_pha_spectrum_lines(dict_par_init_K40,outdir=outdir)
@@ -222,9 +282,16 @@ class Pipeline():
 		param['pha2mev_c0'] = pha2mev_c0
 		param['pha2mev_c1'] = pha2mev_c1
 
-		# time and energy calibration 
+		# energy calibration 
 		evt.set_energy_series(pha2mev_c0=pha2mev_c0,pha2mev_c1=pha2mev_c1)
+
+		# time assignment 
 		evt.set_time_series()
+
+		# energy spectrum 
+		evt.extract_energy_spectrum(outdir=outdir)
+
+		evt.extract_curve(tbin=1.0,energy_min=3.0,energy_max=8.0)
 
 		# output 
 		output_fitsfile = '%s/%s_proc.evt' % (outdir,evt.basename)
@@ -330,8 +397,9 @@ class EventData():
 		"""
 		sys.stdout.write('----- {} -----\n'.format(sys._getframe().f_code.co_name))
 
-		self.df['energy_mev'] = pha2mev_c1 * (self.df['pha'] + np.random.rand() - 0.5) + pha2mev_c0
-		self.df['energy_mev'] = self.df['energy_mev'].astype(np.float32)
+		rand_series = np.random.random_sample(len(self.df['pha']))
+		rand_pha = self.df['pha'].astype(np.float32) + rand_series - 0.5 
+		self.df['energy_mev'] = pha2mev_c1 * rand_pha + pha2mev_c0
 
 	def extract_pha_spectrum(self,
 			nbins=DEFAULT_PHA_SPECTRUM_NBINS,pha_min=0.0,pha_max=DEFAULT_PHA_SPECTRUM_NBINS,
@@ -346,6 +414,23 @@ class EventData():
 		phaspec.plot(outpdf=outpdf,title=self.basename,xlim=xlim)
 		return phaspec
 
+	def extract_energy_spectrum(self,
+			nbins=DEFAULT_ENERGY_SPECTRUM_NBINS,
+			energy_min=DEFAULT_ENERGY_SPECTRUM_MIN,
+			energy_max=DEFAULT_ENERGY_SPECTRUM_MAX,
+			xlim=[DEFAULT_ENERGY_SPECTRUM_MIN,DEFAULT_ENERGY_SPECTRUM_MAX],
+			outdir='./'):
+		"""Extract spectrum of pha
+		nbins: pha bin size
+		"""
+		sys.stdout.write('----- {} -----\n'.format(sys._getframe().f_code.co_name))
+
+		enespec = EnergySpectrum(self.df['energy_mev'],
+			nbins=nbins,energy_min=energy_min,energy_max=energy_max)
+		outpdf = '%s/%s_energyspec.pdf' % (outdir,self.basename)
+		enespec.plot(outpdf=outpdf,title=self.basename,xlim=xlim)
+		return enespec
+
 	def fit_pha_spectrum_lines(self,dict_par_init,outdir='./'):
 		"""Extract spectrum of pha
 		nbins: pha bin size
@@ -356,10 +441,20 @@ class EventData():
 			pha_min=dict_par_init['pha_min'],pha_max=dict_par_init['pha_max'])
 		outpdf = '%s/%s_%s.pdf' % (outdir,self.basename,dict_par_init['name'])
 
-		par = phaspec.fit_gauss_linear(dict_par_init)
+		par = phaspec.fit_gauss_linear(dict_par_init,flag_error=True)
+		par['name'] = dict_par_init['name']
+		par['MeV'] = dict_par_init['MeV']		
 
 		model_x = phaspec.hist.x
 		model_y = np.array([model_gauss_linear(x,peak=par['peak'],sigma=par['sigma'],area=par['area'],c0=par['c0'],c1=par['c1']) for x in model_x])	
+
+		legend_text = '%s at %.1f MeV (fit range: %d sigma)\n' % (par['name'],par['MeV'],par['fit_nsigma'])
+		legend_text += 'peak=%.1f+/-%.1f ch\n' % (par['peak'],par['peak_err'])
+		legend_text += 'sigma=%.1f+/-%.1f ch\n' % (par['sigma'],par['sigma_err'])		
+		legend_text += 'area=%.1f+/-%.1f counts\n' % (par['area'],par['area_err'])
+		legend_text += 'c0=%.1f+/-%.1f counts\n' % (par['c0'],par['c0_err'])		
+		legend_text += 'c1=%.1f+/-%.1f counts\n' % (par['c1'],par['c1_err'])			
+		legend_text += 'resolution=%.1f %%' % (100.0*get_energy_resolution(par['peak'],par['sigma']))
 
 		plot_fit_residual(
 			phaspec.hist.x,phaspec.hist.y,
@@ -367,11 +462,35 @@ class EventData():
 			outpdf=outpdf,
 			hist_xerr=phaspec.hist.xerr,hist_yerr=phaspec.hist.yerr,
 			xlabel='Channel',ylabel='Counts/bin',title=self.basename,
-			xlim=[dict_par_init['pha_min'],dict_par_init['pha_max']])
-
+			xlim=[dict_par_init['pha_min'],dict_par_init['pha_max']],
+			fit_xmin=par['fit_xmin'],fit_xmax=par['fit_xmax'],
+			legend_text=legend_text)
 		return par
 
-	def write_to_fitsfile(self,output_fitsfile=None,config_file=None):
+	def extract_curve(self,tbin=1.0,energy_min=3.0,energy_max=8.0):
+
+		if energy_min == None and energy_max == None:
+			sys.stdout.write("no pha selection.\n")
+			suffix = 'mev_all' 
+			mask = np.full(len(self.df), True)
+		elif energy_min != None and energy_max == None:
+			sys.stdout.write("%d <= energy_meV" % energy_min)	
+			suffix = 'mev_%s_xx' % (str(energy_min).replace('.','p'))								
+			mask = (self.df['energy_meV'] >= energy_min)
+		elif energy_min == None and energy_max != None:
+			sys.stdout.write("energy_meV <= %d" % energy_max)				
+			suffix = 'mev_xx_%s' % (str(energy_max).replace('.','p'))													
+			mask = (self.df['energy_meV'] <= energy_max)
+		elif energy_min != None and energy_max != None:
+			sys.stdout.write("%d <= energy_meV <= %d" % (energy_min,energy_max))
+			suffix = 'mev_%s_%s' % (str(energy_min).replace('.','p'),str(energy_max).replace('.','p'))			
+			mask = np.logical_and((self.df['energy_meV'] >= energy_min),(self.df['energy_meV'] <= energy_max))
+
+		masked_df = self.df[mask]
+		time_max = 	masked_df['unixtime'][-1] - masked_df['unixtime'][0]
+		time_min = 	masked_df['unixtime'][0]
+
+	def write_to_fitsfile(self,output_fitsfile=None,config_file=None,overwrite=True):
 		"""
 		https://docs.astropy.org/en/stable/io/fits/usage/table.html
 		"""
@@ -380,7 +499,11 @@ class EventData():
 		if output_fitsfile == None:
 			output_fitsfile = "{}.evt".format(self.basename)
 		elif os.path.exists(output_fitsfile):
-			raise FileExistsError("{} has alaredy existed.".format(output_fitsfile))
+			if overwrite:
+				cmd = 'rm -f %s' % output_fitsfile
+				print(cmd);os.system(cmd)
+			else:
+				raise FileExistsError("{} has alaredy existed.".format(output_fitsfile))
 
 #		self.set_time_series()
 #		print(type(self.time_series_utc.unix))
@@ -446,21 +569,49 @@ class PhaSpectrum():
 			xlabel='ADC channel (pha)',ylabel='Counts / bin',title=title,
 			flag_xlog=False,flag_ylog=True,xlim=xlim)		
 
-	def fit_gauss_linear(self,par_init):
-		chi2reg = Chi2Regression(model_gauss_linear,self.hist.x,self.hist.y,error=self.hist.yerr)
-		fit = Minuit(chi2reg, peak=par_init['peak'],sigma=par_init['sigma'],
-			area=par_init['area'], c0=par_init['c0'], c1=par_init['c1'])
-		fit.migrad()
-		fit.minos() 
-		fit.print_param()
-		par = {'peak':fit.values[0],'sigma':fit.values[1],'area':fit.values[2],'c0':fit.values[3],'c1':fit.values[4],'peak_err':fit.errors[0],'sigma_err':fit.errors[1],'area_err':fit.errors[2],'c0_err':fit.errors[3],'c1_err':fit.errors[4],'name':par_init['name'],'MeV':par_init['MeV']}
-		return par
-	
+	def fit_gauss_linear(self,par_init,flag_error=True):
+		par = fit_gauss_linear(self.hist.x,self.hist.y,par_init,error=self.hist.yerr)
+		return par 
+
+class EnergySpectrum():
+	"""
+	Energy Spectrum
+	"""
+	def __init__(self, energy_series, nbins, energy_min, energy_max):
+		self.nbins = nbins
+		self.energy_min = energy_min
+		self.energy_max = energy_max 
+
+		self.hist = Hist1D(nbins=self.nbins,xlow=self.energy_min,xhigh=self.energy_max)
+		self.hist.fill(energy_series)		
+
+	def plot(self,outpdf,title='',
+		xlim=[DEFAULT_ENERGY_SPECTRUM_MIN,DEFAULT_ENERGY_SPECTRUM_MAX]):
+		plot_histogram(
+			self.hist.x,self.hist.y,
+			outpdf=outpdf,hist_yerr=None,
+			xlabel='Energy (MeV)',ylabel='Counts / bin',title=title,
+			flag_xlog=False,flag_ylog=True,xlim=xlim)		
 
 class CogamoCurve():
 	"""
 	Light curve
 	"""
-	def __init__(self,csvfilename):
-		print("csvfilename=%s" % csvfilename)
+	def __init__(self,tbin=1.0):
+		self.nbins = nbins
+		self.energy_min = energy_min
+		self.energy_max = energy_max 
+		xlow = 0.0
+		xhigh = data['TIME'][-1] - data['TIME'][0]
+		nbins = round((xhigh-xlow)/tbin)
+		hist_lc = Hist1D(nbins, xlow, xhigh)
+		print(data['TIME'][mask]-data['TIME'][0])
+		hist_lc.fill(data['TIME'][mask]-data['TIME'][0])
+
+		fig, ax = plt.subplots(1,1, figsize=(11.69,8.27))		
+		plt.step(*hist_lc.data)
+
+
+		self.hist = Hist1D(nbins=self.nbins,xlow=self.energy_min,xhigh=self.energy_max)
+		self.hist.fill(energy_series)	
 
