@@ -24,17 +24,21 @@ from probfit import Chi2Regression
 # Default value 
 ##################################################
 
-DEFAULT_PHA_SPECTRUM_NBINS = 2**10
+PHA_SPECTRUM_NBINS = 2**10
 
-DEFAULT_ENERGY_SPECTRUM_NBINS = 2**10
-DEFAULT_ENERGY_SPECTRUM_MIN = 0.0
-DEFAULT_ENERGY_SPECTRUM_MAX = 12.0
+ENERGY_SPECTRUM_NBINS = 2**10
+ENERGY_SPECTRUM_MIN = 0.0
+ENERGY_SPECTRUM_MAX = 12.0
 
-K40_ENERGY_MEV = 1.46083
-Tl208_ENERGY_MEV = 2.61453
+PEAK_MEV_K40 = 1.46083
+PEAK_MEV_TL208 = 2.61453
 
-dict_par_init_Tl208 = {'peak':236,'sigma':7,'area':2651,'c0':798.0,'c1':-3,'MeV':Tl208_ENERGY_MEV,'pha_min':200,'pha_max':264,'nbins':64,'xlim':[200,264],'name':'Tl208'}
-dict_par_init_K40 = {'peak':132,'sigma':5,'area':18025,'c0':3731,'c1':-21.0,'MeV':K40_ENERGY_MEV,'pha_min':100,'pha_max':164,'nbins':64,'xlim':[100,164],'name':'K40'}
+DICT_INITPAR_TL208 = {'peak':236,'sigma':7,'area':2651,'c0':798.0,'c1':-3,'MeV':PEAK_MEV_TL208,'pha_min':220,'pha_max':284,'nbins':64,'xlim':[220,284],'name':'Tl208'}
+DICT_INITPAR_K40 = {'peak':132,'sigma':5,'area':18025,'c0':3731,'c1':-21.0,'MeV':PEAK_MEV_K40,'pha_min':100,'pha_max':164,'nbins':64,'xlim':[100,164],'name':'K40'}
+
+DICT_EXTRACT_CURVE = {'tbin':5.0,'tstart':0.0,'tstop':3600.0,'energy_min':3.0,'energy_max':None,'xlim':[0.0,3600.0]}
+DICT_FIT_BURST_CURVE = DICT_EXTRACT_CURVE
+DICT_FIT_BURST_CURVE['fit_nsigma'] = 8
 
 ##################################################
 # General function and classes 
@@ -244,94 +248,34 @@ class Pipeline():
 		sys.stdout.write("cogamo pipeline\n")
 
 	def process_eventdata(self,filepath):
-
-		# initial setup 
-		param = {}
-
 		# read raw csv file 
 		evt = EventData(filepath)
 		if evt.filetype != 'rawcsv':
 			sys.stdout.write('Input file is not the rawcsv file format.')
 			return 0		
 
-		# prepare outputfile 
-		outdir = 'out/%s' % evt.basename
-		cmd = 'mkdir -p %s' % outdir 
-		os.system(cmd)
+		evt.set_outdir('out/%s' % evt.basename)
 
 		# get energy calibration informatio: two line peak channel 
-		evt.extract_pha_spectrum(outdir=outdir)
-		par_Tl208 = evt.fit_pha_spectrum_lines(dict_par_init_Tl208,outdir=outdir)
-		par_K40 = evt.fit_pha_spectrum_lines(dict_par_init_K40,outdir=outdir)
+		evt.extract_pha_spectrum()
+		dict_par_Tl208 = evt.fit_pha_spectrum_line(DICT_INITPAR_TL208)
+		dict_par_K40 = evt.fit_pha_spectrum_line(DICT_INITPAR_K40)
+		evt.set_energy_calibration_curve(dict_par_K40,dict_par_Tl208)
 
-		for par in [par_K40,par_Tl208]:
-			for strtype in ['','_err']:
-				param['%s_peak%s' % (par['name'],strtype)] = par['peak%s' % strtype]			
-				param['%s_sigma%s' % (par['name'],strtype)] = par['sigma%s' % strtype]
-				param['%s_area%s' % (par['name'],strtype)] = par['area%s' % strtype]
-				param['%s_c0%s' % (par['name'],strtype)] = par['c0%s' % strtype]			
-				param['%s_c1%s' % (par['name'],strtype)] = par['c1%s' % strtype]						
-			param['%s_name' % par['name']] = par['name']						
-			param['%s_MeV' % par['name']] = par['MeV']									
-
-		outpdf = '%s/%s_energycal.pdf' % (outdir,evt.basename)
-		pha2mev_c0, pha2mev_c1 = self.get_pha2mev_param(
-			mev_array=np.array([K40_ENERGY_MEV,Tl208_ENERGY_MEV]),
-			pha_array=np.array([param['K40_peak'],param['Tl208_peak']]),
-			pha_err_array=np.array([param['K40_peak_err'],param['Tl208_peak_err']]),
-			title=evt.basename,outpdf=outpdf)
-		param['pha2mev_c0'] = pha2mev_c0
-		param['pha2mev_c1'] = pha2mev_c1
-
-		# energy calibration 
-		evt.set_energy_series(pha2mev_c0=pha2mev_c0,pha2mev_c1=pha2mev_c1)
-
-		# time assignment 
+		evt.set_energy_series(pha2mev_c0=evt.pha2mev_c0,pha2mev_c1=evt.pha2mev_c1)
 		evt.set_time_series()
 
-		# energy spectrum 
-		evt.extract_energy_spectrum(outdir=outdir)
-
-		evt.extract_curve(tbin=5.0,energy_min=3.0,energy_max=None,outdir=outdir)
+		evt.extract_energy_spectrum()
+		evt.extract_curve()
 
 		# if burst was detected
-		#par = evt.fit_burst_curve(tbin=5.0,tstart=0.0,tstop=500.0,energy_min=3.0,energy_max=None)
-		par = evt.fit_burst_curve(tbin=5.0,tstart=0.0,tstop=500.0,energy_min=3.0,energy_max=None,outdir=outdir)		
+		par = evt.fit_burst_curve()		
 
 		evt.get_burst_duration(par,tbin=1.0,tstart=par['fit_xmin'],tstop=par['fit_xmax'],
-			energy_min=3.0,energy_max=None,linear_tbin_normalization=5.0,outdir=outdir)
+			energy_min=3.0,energy_max=None,linear_tbin_normalization=5.0)
 
-		# output 
-		output_fitsfile = '%s/%s_proc.evt' % (outdir,evt.basename)
-		evt.write_to_fitsfile(output_fitsfile=output_fitsfile,config_file=None)
-
-		yamlfile = '%s/%s_process.yaml' % (outdir,evt.basename)
-		with open(yamlfile, "w") as wf:
-		    yaml.dump(param, wf,default_flow_style=False)	
-
-	def get_pha2mev_param(self,mev_array,pha_array,pha_err_array,title,outpdf):
-
-		mev_diff = np.diff(mev_array)[0]
-		pha_diff = np.diff(pha_array)[0]
-		slope_init = pha_diff / mev_diff
-		chi2reg = Chi2Regression(model_linear,mev_array,pha_array,error=pha_err_array)
-		fit = Minuit(chi2reg,c0=0.0,c1=slope_init)
-		fit.migrad()
-		fit.minos() 
-		fit.print_param()	
-		mev2pha_c0 = fit.values[0]	
-		mev2pha_c1 = fit.values[1]	
-
-		model_x = np.linspace(0,11,1600)
-		model_y = np.array(model_linear(model_x,mev2pha_c0,mev2pha_c1))
-		plot_xydata(mev_array,pha_array,yerr=pha_err_array,
-			model_x=model_x, model_y=model_y,
-			outpdf=outpdf,
-			xlabel='Energy (MeV)',ylabel='PHA (channel)',title=title)
-
-		pha2mev_c0 = - mev2pha_c0 / mev2pha_c1
-		pha2mev_c1 = 1 / mev2pha_c1
-		return pha2mev_c0, pha2mev_c1
+		evt.write_to_fitsfile()
+		evt.write_to_yamlfile()
 
 class EventData():
 	"""Represents an EventData of a Cogamo detector.
@@ -356,6 +300,8 @@ class EventData():
 		self.filepath = filepath
 		self.filename = os.path.basename(self.filepath)
 		self.basename = os.path.splitext(self.filename)[0]
+
+		self.param = {}
 
 		self.set_filetype()
 		self.open_file()
@@ -382,6 +328,21 @@ class EventData():
 				return -1
 		except OSError as e:
 			raise
+
+	def set_outdir(self,outdir,flag_overwrite=True):
+		self.outdir = outdir 
+
+		#outdir = 'out/%s' % evt.basename
+		if flag_overwrite:
+			cmd = 'rm -rf %s; mkdir -p %s' % (self.outdir,self.outdir)
+			print(cmd);os.system(cmd)
+		else:
+			if os.path.exists(outdir):
+				sys.stdout.write('outdir already existed.')
+				return -1
+			else:
+				cmd = 'mkdir -p %s' % (self.outdir)
+				print(cmd);os.system(cmd)				
 
 	def set_time_series(self):		
 		"""
@@ -415,24 +376,23 @@ class EventData():
 		self.df['energy_mev'] = pha2mev_c1 * rand_pha + pha2mev_c0
 
 	def extract_pha_spectrum(self,
-			nbins=DEFAULT_PHA_SPECTRUM_NBINS,pha_min=0.0,pha_max=DEFAULT_PHA_SPECTRUM_NBINS,
-			xlim=[1,DEFAULT_PHA_SPECTRUM_NBINS],outdir='./'):
+			nbins=PHA_SPECTRUM_NBINS,pha_min=0.0,pha_max=PHA_SPECTRUM_NBINS,
+			xlim=[1,PHA_SPECTRUM_NBINS]):
 		"""Extract spectrum of pha
 		nbins: pha bin size
 		"""
 		sys.stdout.write('----- {} -----\n'.format(sys._getframe().f_code.co_name))
 
 		phaspec = PhaSpectrum(self.df['pha'],nbins=nbins,pha_min=pha_min,pha_max=pha_max)
-		outpdf = '%s/%s_phaspec.pdf' % (outdir,self.basename)
+		outpdf = '%s/%s_phaspec.pdf' % (self.outdir,self.basename)
 		phaspec.plot(outpdf=outpdf,title=self.basename,xlim=xlim)
 		return phaspec
 
 	def extract_energy_spectrum(self,
-			nbins=DEFAULT_ENERGY_SPECTRUM_NBINS,
-			energy_min=DEFAULT_ENERGY_SPECTRUM_MIN,
-			energy_max=DEFAULT_ENERGY_SPECTRUM_MAX,
-			xlim=[DEFAULT_ENERGY_SPECTRUM_MIN,DEFAULT_ENERGY_SPECTRUM_MAX],
-			outdir='./'):
+			nbins=ENERGY_SPECTRUM_NBINS,
+			energy_min=ENERGY_SPECTRUM_MIN,
+			energy_max=ENERGY_SPECTRUM_MAX,
+			xlim=[ENERGY_SPECTRUM_MIN,ENERGY_SPECTRUM_MAX]):
 		"""Extract spectrum of pha
 		nbins: pha bin size
 		"""
@@ -440,23 +400,23 @@ class EventData():
 
 		enespec = EnergySpectrum(self.df['energy_mev'],
 			nbins=nbins,energy_min=energy_min,energy_max=energy_max)
-		outpdf = '%s/%s_energyspec.pdf' % (outdir,self.basename)
+		outpdf = '%s/%s_energyspec.pdf' % (self.outdir,self.basename)
 		enespec.plot(outpdf=outpdf,title=self.basename,xlim=xlim)
 		return enespec
 
-	def fit_pha_spectrum_lines(self,dict_par_init,outdir='./'):
+	def fit_pha_spectrum_line(self,dict_initpar):
 		"""Extract spectrum of pha
 		nbins: pha bin size
 		"""
 		sys.stdout.write('----- {} -----\n'.format(sys._getframe().f_code.co_name))
 
-		phaspec = PhaSpectrum(self.df['pha'],nbins=dict_par_init['nbins'],
-			pha_min=dict_par_init['pha_min'],pha_max=dict_par_init['pha_max'])
-		outpdf = '%s/%s_%s.pdf' % (outdir,self.basename,dict_par_init['name'])
+		phaspec = PhaSpectrum(self.df['pha'],nbins=dict_initpar['nbins'],
+			pha_min=dict_initpar['pha_min'],pha_max=dict_initpar['pha_max'])
+		outpdf = '%s/%s_%s.pdf' % (self.outdir,self.basename,dict_initpar['name'])
 
-		par = phaspec.fit_gauss_linear(dict_par_init,flag_error=True)
-		par['name'] = dict_par_init['name']
-		par['MeV'] = dict_par_init['MeV']		
+		par = phaspec.fit_gauss_linear(dict_initpar,flag_error=True)
+		par['name'] = dict_initpar['name']
+		par['MeV'] = dict_initpar['MeV']		
 
 		model_x = phaspec.hist.x
 		model_y = np.array([model_gauss_linear(x,peak=par['peak'],sigma=par['sigma'],area=par['area'],c0=par['c0'],c1=par['c1']) for x in model_x])	
@@ -475,11 +435,55 @@ class EventData():
 			outpdf=outpdf,
 			hist_xerr=phaspec.hist.xerr,hist_yerr=phaspec.hist.yerr,
 			xlabel='Channel',ylabel='Counts/bin',title=self.basename,
-			xlim=[dict_par_init['pha_min'],dict_par_init['pha_max']],
+			xlim=[par['peak']-5*par['sigma'],par['peak']+5*par['sigma']],
 			fit_xmin=par['fit_xmin'],fit_xmax=par['fit_xmax'],
 			legend_text=legend_text)
 		return par
 
+	def set_energy_calibration_curve(self,dict_par_K40,dict_par_Tl208):
+
+		for par in [dict_par_K40,dict_par_Tl208]:
+			for strtype in ['','_err']:
+				self.param['%s_peak%s' % (par['name'],strtype)] = par['peak%s' % strtype]	
+				self.param['%s_sigma%s' % (par['name'],strtype)] = par['sigma%s' % strtype]
+				self.param['%s_area%s' % (par['name'],strtype)] = par['area%s' % strtype]
+				self.param['%s_c0%s' % (par['name'],strtype)] = par['c0%s' % strtype]	
+				self.param['%s_c1%s' % (par['name'],strtype)] = par['c1%s' % strtype]						
+			self.param['%s_name' % par['name']] = par['name']
+			self.param['%s_MeV' % par['name']] = par['MeV']								
+
+		outpdf = '%s/%s_energycal.pdf' % (self.outdir,self.basename)
+		self.pha2mev_c0, self.pha2mev_c1 = self.get_pha2mev_param(
+			mev_array=np.array([PEAK_MEV_K40,PEAK_MEV_TL208]),
+			pha_array=np.array([self.param['K40_peak'],self.param['Tl208_peak']]),
+			pha_err_array=np.array([self.param['K40_peak_err'],self.param['Tl208_peak_err']]),
+			title=self.basename,outpdf=outpdf)
+		self.param['pha2mev_c0'] = self.pha2mev_c0
+		self.param['pha2mev_c1'] = self.pha2mev_c1
+
+	def get_pha2mev_param(self,mev_array,pha_array,pha_err_array,title,outpdf):
+
+		mev_diff = np.diff(mev_array)[0]
+		pha_diff = np.diff(pha_array)[0]
+		slope_init = pha_diff / mev_diff
+		chi2reg = Chi2Regression(model_linear,mev_array,pha_array,error=pha_err_array)
+		fit = Minuit(chi2reg,c0=0.0,c1=slope_init)
+		fit.migrad()
+		fit.minos() 
+		fit.print_param()	
+		mev2pha_c0 = fit.values[0]	
+		mev2pha_c1 = fit.values[1]	
+
+		model_x = np.linspace(0,11,1600)
+		model_y = np.array(model_linear(model_x,mev2pha_c0,mev2pha_c1))
+		plot_xydata(mev_array,pha_array,yerr=pha_err_array,
+			model_x=model_x, model_y=model_y,
+			outpdf=outpdf,
+			xlabel='Energy (MeV)',ylabel='PHA (channel)',title=title)
+
+		pha2mev_c0 = - mev2pha_c0 / mev2pha_c1
+		pha2mev_c1 = 1 / mev2pha_c1
+		return pha2mev_c0, pha2mev_c1
 
 	def get_energy_mask(self,energy_min,energy_max):
 
@@ -503,17 +507,33 @@ class EventData():
 
 		return mask, message, suffix 		
 
-	def extract_curve(self,tbin=1.0,tstart=0.0,tstop=3600.0,energy_min=3.0,energy_max=8.0,outdir='./'):
+	def extract_curve(self,
+			tbin=DICT_EXTRACT_CURVE['tbin'],
+			tstart=DICT_EXTRACT_CURVE['tstart'],
+			tstop=DICT_EXTRACT_CURVE['tstop'],
+			energy_min=DICT_EXTRACT_CURVE['energy_min'],
+			energy_max=DICT_EXTRACT_CURVE['energy_max'],
+			xlim=DICT_EXTRACT_CURVE['xlim']):
 		""" Energy in MeV unit
 		"""
-		mask, message, suffix = self.get_energy_mask(energy_min=energy_min,energy_max=energy_max)
+		mask, message, suffix = self.get_energy_mask(
+			energy_min=energy_min,energy_max=energy_max)
 
-		lc = LightCurve(np.array(self.df[mask]['unixtime']),float(self.unixtime_offset),tbin=tbin,tstart=tstart,tstop=tstop)
+		lc = LightCurve(
+			np.array(self.df[mask]['unixtime']),
+			float(self.unixtime_offset),
+			tbin=tbin,tstart=tstart,tstop=tstop)
 		title = '%s (%s)' % (self.basename, message)
-		outpdf = '%s/%s_lc_%s.pdf' % (outdir,self.basename,suffix)
-		lc.plot(outpdf=outpdf,title=title,xlim=[0.0,500.0])		
+		outpdf = '%s/%s_lc_%s.pdf' % (self.outdir,self.basename,suffix)
+		lc.plot(outpdf=outpdf,title=title,xlim=xlim)		
 
-	def fit_burst_curve(self,tbin=8.0,tstart=0.0,tstop=3600.0,energy_min=3.0,energy_max=8.0,outdir='./'):
+	def fit_burst_curve(self,
+			tbin=DICT_FIT_BURST_CURVE['tbin'],
+			tstart=DICT_FIT_BURST_CURVE['tstart'],
+			tstop=DICT_FIT_BURST_CURVE['tstop'],
+			energy_min=DICT_FIT_BURST_CURVE['energy_min'],
+			energy_max=DICT_FIT_BURST_CURVE['energy_max'],
+			fit_nsigma=DICT_FIT_BURST_CURVE['fit_nsigma']):
 		""" Energy in MeV unit
 		"""
 		mask, message, suffix = self.get_energy_mask(energy_min=energy_min,energy_max=energy_max)
@@ -522,10 +542,9 @@ class EventData():
 			tbin=tbin,tstart=tstart,tstop=tstop)
 		title = '%s (%s)' % (self.basename, message)
 
-#		dict_par_init = {'peak':300,'sigma':10,'area':100,'c0':10,'c1':0}
-		dict_par_init = {'peak':300,'sigma':10,'area':600,'c0':14,'c1':0,'fit_xmin':200,'fit_xmax':500}
-		#dict_par_init = {'peak':300,'sigma':10,'area':600,'c0':3,'c1':0,'fit_xmin':200,'fit_xmax':500}
-		par = lc.fit_gauss_linear(dict_par_init,flag_error=True,fit_nsigma=6)
+#		dict_initpar = {'peak':300,'sigma':10,'area':100,'c0':10,'c1':0}
+		dict_initpar = {'peak':300,'sigma':10,'area':600,'c0':14,'c1':0,'fit_xmin':200,'fit_xmax':500}
+		par = lc.fit_gauss_linear(dict_initpar,flag_error=True,fit_nsigma=fit_nsigma)
 		print("---------")
 		print(par)
 		print("---------")
@@ -544,21 +563,24 @@ class EventData():
 		legend_text += 'resolution=%.1f %%' % (100.0*get_energy_resolution(par['peak'],par['sigma']))
 		"""
 		legend_text = ""
-		outpdf = '%s/%s_bst_gaussfit.pdf' % (outdir,self.basename)
 		plot_fit_residual(
-			lc.hist.x,lc.hist.y,
-			model_x,model_y,			
-			outpdf=outpdf,
-			hist_xerr=lc.hist.xerr,hist_yerr=lc.hist.yerr,
-			xlabel='Channel',ylabel='Counts / (%d sec)' % tbin,
-			title=self.basename,
-			xlim=[tstart,tstop],
-			fit_xmin=par['fit_xmin'],fit_xmax=par['fit_xmax'],
+			lc.hist.x, lc.hist.y,
+			model_x, model_y,			
+			outpdf='%s/%s_bst_gaussfit.pdf' % (self.outdir,self.basename),
+			hist_xerr=lc.hist.xerr,
+			hist_yerr=lc.hist.yerr,
+			xlabel='Time (sec) since %s' % datetime.fromtimestamp(self.unixtime_offset),
+			ylabel='Counts / (%d sec)' % tbin,
+			title='%s (%s)' % (self.basename, message),
+			xlim=[par['fit_xmin'],par['fit_xmax']],
+			fit_xmin=par['peak']-3*par['sigma'],
+			fit_xmax=par['peak']+3*par['sigma'],
 			legend_text=legend_text)
 		return par
 
-	def get_burst_duration(self,par,tbin=1.0,tstart=0.0,tstop=500.0,energy_min=3.0,energy_max=8.0,
-		linear_tbin_normalization=1.0,outdir='./'):
+	def get_burst_duration(self,par,tbin=1.0,tstart=0.0,tstop=500.0,
+		energy_min=3.0,energy_max=8.0,
+		linear_tbin_normalization=1.0):
 
 		mask, message, suffix = self.get_energy_mask(energy_min=energy_min,energy_max=energy_max)
 
@@ -567,7 +589,7 @@ class EventData():
 			tbin=tbin,tstart=tstart,tstop=tstop)		
 		print(unixtime_series)
 
-		outpdf = '%s/%s_accumy.pdf' % (outdir,self.basename)
+		outpdf = '%s/%s_accumy.pdf' % (self.outdir,self.basename)
 		lc.plot_accumulation(par,linear_tbin_normalization=linear_tbin_normalization,outpdf=outpdf)
 		#title = '%s (%s)' % (self.basename, message)
 		#lc.plot(outpdf='lc1.pdf',title=title,xlim=[0.0,500.0])		
@@ -579,7 +601,7 @@ class EventData():
 		sys.stdout.write('----- {} -----\n'.format(sys._getframe().f_code.co_name))
 
 		if output_fitsfile == None:
-			output_fitsfile = "{}.evt".format(self.basename)
+			output_fitsfile = "%s/%s.evt" % (self.outdir,self.basename)
 		elif os.path.exists(output_fitsfile):
 			if overwrite:
 				cmd = 'rm -f %s' % output_fitsfile
@@ -619,6 +641,11 @@ class EventData():
 		hdu.header['history'] = 'created at {} JST'.format(Time.now().to_datetime(tz_tokyo))
 		hdu.writeto(output_fitsfile)
 
+	def write_to_yamlfile(self):
+		yamlfile = '%s/%s_process.yaml' % (self.outdir,self.basename)
+		with open(yamlfile, "w") as wf:
+		    yaml.dump(self.param, wf,default_flow_style=False)		
+
 	def __str__(self):
 		dump  = 'filepath: {}\n'.format(self.filepath)
 		dump += 'filetype: {}\n'.format(self.filetype)		
@@ -644,7 +671,7 @@ class PhaSpectrum():
 		self.hist = Hist1D(nbins=self.nbins,xlow=self.pha_min-0.5,xhigh=self.pha_max-0.5)
 		self.hist.fill(pha_series)		
 
-	def plot(self,outpdf,title='',xlim=[1,DEFAULT_PHA_SPECTRUM_NBINS]):
+	def plot(self,outpdf,title='',xlim=[1,PHA_SPECTRUM_NBINS]):
 		plot_histogram(
 			self.hist.x,self.hist.y,
 			outpdf=outpdf,hist_yerr=None,
@@ -668,7 +695,7 @@ class EnergySpectrum():
 		self.hist.fill(energy_series)		
 
 	def plot(self,outpdf,title='',
-		xlim=[DEFAULT_ENERGY_SPECTRUM_MIN,DEFAULT_ENERGY_SPECTRUM_MAX]):
+		xlim=[ENERGY_SPECTRUM_MIN,ENERGY_SPECTRUM_MAX]):
 		plot_histogram(
 			self.hist.x,self.hist.y,
 			outpdf=outpdf,hist_yerr=None,
@@ -697,7 +724,7 @@ class LightCurve():
 		plot_histogram(
 			self.hist.x,self.hist.y,
 			outpdf=outpdf,hist_yerr=self.hist.yerr,
-			xlabel='Time since %s (sec)' % self.time_offset_str,
+			xlabel='Time (sec) since %s JST' % self.time_offset_str,
 			ylabel='Counts / (%d sec)' % self.tbin,title=title,
 			flag_xlog=False,flag_ylog=False,xlim=xlim)	
 
@@ -725,7 +752,7 @@ class LightCurve():
 		plot_histogram(
 			self.hist.x,self.hist.accum_y,
 			outpdf=outpdf,hist_yerr=None,
-			xlabel='Time since %s (sec)' % self.time_offset_str,
+			xlabel='Time (sec) since %s JST' % self.time_offset_str,
 			ylabel='Number of events',title=title,
 			flag_xlog=False,flag_ylog=False,xlim=None)	
 
