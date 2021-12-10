@@ -4,6 +4,7 @@ import os
 import re
 import sys
 import yaml
+import glob 
 import numpy as np 
 import pandas as pd 
 
@@ -243,26 +244,120 @@ class Hist1D(object):
 # Cogamo 
 ##################################################
 
-class Pipeline():
-	def __init__(self):
-		sys.stdout.write("cogamo pipeline\n")
+class Archive(object):
+	def __init__(self,parameter_yamlfile):
+		self.param = yaml.load(open(parameter_yamlfile),
+			Loader=yaml.FullLoader)		
+		print("[Archive] %s is generatd." % self.param['archive_name'])
 
-	def process_eventdata(self,filepath):
-		# read raw csv file 
-		evt = EventData(filepath)
+		self.dict = {
+			'detid':[],
+			'time':[],
+			'process': [],
+			'bstcand': [],
+			'bstlclink': [],
+			'bstlcfile': [],	
+			'bstdistlink': [],
+			'bstdistfile': [],	
+			'bstlc_mean':[],
+			'bstlc_sigma':[],
+			'bstlc_area':[],	
+			'bstalert_link': [],
+			'bstalert_file': [],
+			'lclink': [],
+			'lcfile': [],
+			'phalink': [],
+			'phafile': [],
+			'csvfile':[],
+			'csvpath':[],			
+			'csvlink':[]
+			}
+
+	def set_csvfiles(self):
+		sys.stdout.write('[archive] {} \n'.format(sys._getframe().f_code.co_name))
+
+		### Find CSV file and make archives. 
+		csv_filelst = sorted(glob.glob('%s/**/*.csv' % self.param['datadir'],
+			recursive=True))
+		for file_path in csv_filelst:
+			self.add(file_path)
+		print(csv_filelst)	
+
+	def add(self,file_path):
+		print("[Archive %s] add %s" % (self.param['archive_name'],file_path))
+
+		filename = os.path.basename(file_path)	
+		basename, ext = os.path.splitext(filename)
+		if ext != '.csv':
+			print("Warning: skip the file %s" % csvfile)
+			return -1
+		detid, yyyymmdd, hour = basename.split("_")
+		#print(detid,yyyymmdd,hour)
+
+		year = yyyymmdd[0:4]
+		month = yyyymmdd[4:6]
+		day = yyyymmdd[6:8]		
+		str_time = '%04d-%02d-%02dT%02d:00:00' % (int(year),int(month),int(day),int(hour))
+
+		self.dict['detid'].append(detid)
+		self.dict['time'].append(str_time)
+		self.dict['process'].append('--')
+		self.dict['bstcand'].append('--')
+		self.dict['bstlclink'].append('--')
+		self.dict['bstlcfile'].append('--')
+		self.dict['bstdistlink'].append('--')
+		self.dict['bstdistfile'].append('--')
+		self.dict['bstlc_mean'].append('--')
+		self.dict['bstlc_sigma'].append('--')
+		self.dict['bstlc_area'].append('--')				
+		self.dict['csvlink'].append('<a href="%s">%s</a>' % (file_path,filename))
+		self.dict['csvpath'].append(file_path)		
+		self.dict['csvfile'].append(filename)
+		self.dict['bstalert_link'].append('--')
+		self.dict['bstalert_file'].append('--')
+		self.dict['lclink'].append('--')
+		self.dict['lcfile'].append('--')			
+		self.dict['phalink'].append('--')
+		self.dict['phafile'].append('--')		
+		return 0 
+
+	def convert_to_dataframe(self):
+		self.df = pd.DataFrame.from_dict(self.dict, orient='index').T
+		#self.df = self.df.shift()[1:] # shift index starting from 0 to 1	
+
+	def write(self):
+		if not os.path.exists(self.param['outdir']):
+			cmd = 'mkdir -p %s' % self.param['outdir']
+			print(cmd);os.system(cmd)
+
+		cmd = 'rm -f %s/%s.{csv,html}' % (self.param['outdir'],self.param['archive_name'])
+		print(cmd);os.system(cmd)
+	
+		self.df.to_csv('%s/%s.csv' % (self.param['outdir'],self.param['archive_name']))
+
+		self.df.drop(['csvpath','csvfile','lcfile','phafile','bstlcfile','bstdistfile','bstalert_file'],axis=1).to_html('%s/%s.html' % (self.param['outdir'],self.param['archive_name']), render_links=True, escape=False)
+
+	def process(self,index):
+		print("[Archive %s] process index of %s" % (self.param['archive_name'],index))
+
+		csvpath = self.df.iloc[index]['csvpath']
+
+		evt = EventData(csvpath)
 		if evt.filetype != 'rawcsv':
 			sys.stdout.write('Input file is not the rawcsv file format.')
 			return 0		
 
-		evt.set_outdir('out/%s' % evt.basename)
+		outdir = '%s/product/id%s/%s/%s/%s/%s' % (self.param['outdir'],evt.detid_str, evt.year, evt.month, evt.day, evt.hour_jst)
+		evt.set_outdir(outdir)
 
-		# get energy calibration informatio: two line peak channel 
 		evt.extract_pha_spectrum()
 		dict_par_Tl208 = evt.fit_pha_spectrum_line(DICT_INITPAR_TL208)
 		dict_par_K40 = evt.fit_pha_spectrum_line(DICT_INITPAR_K40)
 		evt.set_energy_calibration_curve(dict_par_K40,dict_par_Tl208)
 
-		evt.set_energy_series(pha2mev_c0=evt.pha2mev_c0,pha2mev_c1=evt.pha2mev_c1)
+		evt.set_energy_series(
+			pha2mev_c0=evt.pha2mev_c0,
+			pha2mev_c1=evt.pha2mev_c1)
 		evt.set_time_series()
 
 		evt.extract_energy_spectrum()
@@ -276,6 +371,58 @@ class Pipeline():
 
 		evt.write_to_fitsfile()
 		evt.write_to_yamlfile()
+		"""		
+		# make directory 
+		evt.mkdir(outdir)
+
+		# draw spectrum
+		pha_spectrum_pdf = evt.plot_pha_spectrum(
+			pha_min=self.param['plot_pha_spectrum_min'],
+			pha_max=self.param['plot_pha_spectrum_max'],
+			pha_nbin=self.param['plot_pha_spectrum_nbin'],
+			xmin=self.param['plot_pha_spectrum_xmin'],
+			xmax=self.param['plot_pha_spectrum_xmax'])
+		self.df.iloc[index]['phalink'] = '<a href=\"../%s\">pha_spec</a>' % (pha_spectrum_pdf)
+		self.df.iloc[index]['phafile'] = pha_spectrum_pdf
+		"""
+
+"""
+class Pipeline():
+	def __init__(self):
+		sys.stdout.write("cogamo pipeline\n")
+
+	def process_eventdata(self,filepath):
+		# read raw csv file 
+		evt = EventData(filepath)
+		if evt.filetype != 'rawcsv':
+			sys.stdout.write('Input file is not the rawcsv file format.')
+			return 0		
+
+		#evt.set_outdir('out/%s' % evt.basename)
+
+		# get energy calibration informatio: two line peak channel 
+		evt.extract_pha_spectrum()
+		dict_par_Tl208 = evt.fit_pha_spectrum_line(DICT_INITPAR_TL208)
+		dict_par_K40 = evt.fit_pha_spectrum_line(DICT_INITPAR_K40)
+		evt.set_energy_calibration_curve(dict_par_K40,dict_par_Tl208)
+
+		evt.set_energy_series(
+			pha2mev_c0=evt.pha2mev_c0,
+			pha2mev_c1=evt.pha2mev_c1)
+		evt.set_time_series()
+
+		evt.extract_energy_spectrum()
+		evt.extract_curve()
+
+		# if burst was detected
+		par = evt.fit_burst_curve()		
+
+		evt.get_burst_duration(par,tbin=1.0,tstart=par['fit_xmin'],tstop=par['fit_xmax'],
+			energy_min=3.0,energy_max=None,linear_tbin_normalization=5.0)
+
+		evt.write_to_fitsfile()
+		evt.write_to_yamlfile()
+"""
 
 class EventData():
 	"""Represents an EventData of a Cogamo detector.
@@ -310,6 +457,9 @@ class EventData():
 		if re.fullmatch(r'\d{3}_\d{8}_\d{2}.csv', self.filename):
 			self.filetype = 'rawcsv'
 			self.detid_str, self.yyyymmdd_jst, self.hour_jst = self.basename.split("_")		
+			self.year = self.yyyymmdd_jst[0:4]
+			self.month = self.yyyymmdd_jst[4:6]
+			self.day = self.yyyymmdd_jst[6:8]			
 		else:
 			sys.stdout.write("[error] filetype error...")
 			return -1
@@ -350,11 +500,8 @@ class EventData():
 		Sub-second time stamp is handled by another column
 		"""
 		sys.stdout.write('----- {} -----\n'.format(sys._getframe().f_code.co_name))
-
-		year = self.yyyymmdd_jst[0:4]
-		month = self.yyyymmdd_jst[4:6]
-		day = self.yyyymmdd_jst[6:8]		
-		str_time = '%04d-%02d-%02dT%02d:' % (int(year),int(month),int(day),int(self.hour_jst))
+		
+		str_time = '%04d-%02d-%02dT%02d:' % (int(self.year),int(self.month),int(self.day),int(self.hour_jst))
 		time_series_str  = np.char.array(np.full(self.nevents, str_time)) + np.char.mod('%02d:',self.df['minute']) + np.char.mod('%02d',self.df['sec']) + np.char.mod('.%04d',self.df['decisec']) 
 		time_series_jst = Time(time_series_str, format='isot', scale='utc', precision=5) 
 		self.time_series_utc = time_series_jst - timedelta(hours=+9)
