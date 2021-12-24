@@ -38,6 +38,8 @@ DICT_INITPAR_TL208 = {'peak':236,'sigma':7,'area':2651,'c0':798.0,'c1':-3,'MeV':
 DICT_INITPAR_K40 = {'peak':132,'sigma':5,'area':18025,'c0':3731,'c1':-21.0,'MeV':PEAK_MEV_K40,'pha_min':100,'pha_max':164,'nbins':64,'xlim':[100,164],'name':'K40'}
 
 DICT_EXTRACT_CURVE = {'tbin':5.0,'tstart':0.0,'tstop':3600.0,'energy_min':3.0,'energy_max':None,'xlim':[0.0,3600.0]}
+DICT_SEARCH_BURST = DICT_EXTRACT_CURVE
+DICT_SEARCH_BURST['burst_sigma'] = 4.0
 DICT_FIT_BURST_CURVE = DICT_EXTRACT_CURVE
 DICT_FIT_BURST_CURVE['fit_nsigma'] = 8
 
@@ -371,58 +373,6 @@ class Archive(object):
 
 		evt.write_to_fitsfile()
 		evt.write_to_yamlfile()
-		"""		
-		# make directory 
-		evt.mkdir(outdir)
-
-		# draw spectrum
-		pha_spectrum_pdf = evt.plot_pha_spectrum(
-			pha_min=self.param['plot_pha_spectrum_min'],
-			pha_max=self.param['plot_pha_spectrum_max'],
-			pha_nbin=self.param['plot_pha_spectrum_nbin'],
-			xmin=self.param['plot_pha_spectrum_xmin'],
-			xmax=self.param['plot_pha_spectrum_xmax'])
-		self.df.iloc[index]['phalink'] = '<a href=\"../%s\">pha_spec</a>' % (pha_spectrum_pdf)
-		self.df.iloc[index]['phafile'] = pha_spectrum_pdf
-		"""
-
-"""
-class Pipeline():
-	def __init__(self):
-		sys.stdout.write("cogamo pipeline\n")
-
-	def process_eventdata(self,filepath):
-		# read raw csv file 
-		evt = EventData(filepath)
-		if evt.filetype != 'rawcsv':
-			sys.stdout.write('Input file is not the rawcsv file format.')
-			return 0		
-
-		#evt.set_outdir('out/%s' % evt.basename)
-
-		# get energy calibration informatio: two line peak channel 
-		evt.extract_pha_spectrum()
-		dict_par_Tl208 = evt.fit_pha_spectrum_line(DICT_INITPAR_TL208)
-		dict_par_K40 = evt.fit_pha_spectrum_line(DICT_INITPAR_K40)
-		evt.set_energy_calibration_curve(dict_par_K40,dict_par_Tl208)
-
-		evt.set_energy_series(
-			pha2mev_c0=evt.pha2mev_c0,
-			pha2mev_c1=evt.pha2mev_c1)
-		evt.set_time_series()
-
-		evt.extract_energy_spectrum()
-		evt.extract_curve()
-
-		# if burst was detected
-		par = evt.fit_burst_curve()		
-
-		evt.get_burst_duration(par,tbin=1.0,tstart=par['fit_xmin'],tstop=par['fit_xmax'],
-			energy_min=3.0,energy_max=None,linear_tbin_normalization=5.0)
-
-		evt.write_to_fitsfile()
-		evt.write_to_yamlfile()
-"""
 
 class EventData():
 	"""Represents an EventData of a Cogamo detector.
@@ -673,6 +623,51 @@ class EventData():
 		title = '%s (%s)' % (self.basename, message)
 		outpdf = '%s/%s_lc_%s.pdf' % (self.outdir,self.basename,suffix)
 		lc.plot(outpdf=outpdf,title=title,xlim=xlim)		
+
+	def search_burst(self,
+			tbin=DICT_SEARCH_BURST['tbin'],
+			tstart=DICT_SEARCH_BURST['tstart'],
+			tstop=DICT_SEARCH_BURST['tstop'],
+			energy_min=DICT_SEARCH_BURST['energy_min'],
+			energy_max=DICT_SEARCH_BURST['energy_max'],
+			xlim=DICT_SEARCH_BURST['burst_sigma']):
+		""" Energy in MeV unit
+		"""
+		mask, message, suffix = self.get_energy_mask(
+			energy_min=energy_min,energy_max=energy_max)
+
+		lc = LightCurve(
+			np.array(self.df[mask]['unixtime']),
+			float(self.unixtime_offset),
+			tbin=tbin,tstart=tstart,tstop=tstop)
+
+		xhigh = round(1.2*max(lc.hist.y))-0.5
+		self.cnt_hist = Hist1D(nbins=int(xhigh),xlow=-0.5,xhigh=xhigh)
+		self.cnt_hist.fill(lc.hist.y)
+
+		title = 'rate histogram'
+		outpdf = '%s/test.pdf' % self.outdir
+		plot_histogram(
+			self.cnt_hist.x,self.cnt_hist.y,
+			outpdf=outpdf,hist_yerr=None,
+			xlabel='Counts/bin',
+			ylabel='Number of events',title=title,
+			flag_xlog=False,flag_ylog=False,xlim=None)	
+
+		print("---------")
+		peak = np.mean(lc.hist.y)
+		sigma = np.std(lc.hist.y)
+		area = np.sum(lc.hist.y)
+		dict_initpar = {'peak':peak,'sigma':sigma,'area':area,
+			'c0':0,'c1':0,'fit_xmin':-0.5,'fit_xmax':xhigh}
+		par = fit_gauss_linear(self.cnt_hist.x,self.cnt_hist.y,
+			par_init=dict_initpar,error=None,fit_nsigma=5)
+		print(par)
+		#print("---------")
+		#print(lc.hist.y)
+#		title = '%s (%s)' % (self.basename, message)
+#		outpdf = '%s/%s_lc_%s.pdf' % (self.outdir,self.basename,suffix)
+#		lc.plot(outpdf=outpdf,title=title,xlim=xlim)		
 
 	def fit_burst_curve(self,
 			tbin=DICT_FIT_BURST_CURVE['tbin'],
