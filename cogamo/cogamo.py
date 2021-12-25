@@ -18,6 +18,7 @@ tz_utc = timezone(timedelta(hours=0), 'UTC')
 import matplotlib.pylab as plt 
 import matplotlib.gridspec as gridspec
 
+from scipy.stats import norm
 from iminuit import Minuit
 from probfit import Chi2Regression
 
@@ -34,18 +35,21 @@ ENERGY_SPECTRUM_MAX = 12.0
 PEAK_MEV_K40 = 1.46083
 PEAK_MEV_TL208 = 2.61453
 
-DICT_INITPAR_TL208 = {'peak':236,'sigma':7,'area':2651,'c0':798.0,'c1':-3,'MeV':PEAK_MEV_TL208,'pha_min':220,'pha_max':284,'nbins':64,'xlim':[220,284],'name':'Tl208'}
+DICT_INITPAR_TL208 = {'peak':236,'sigma':7,'area':2651,'c0':798.0,'c1':-3,'MeV':PEAK_MEV_TL208,'pha_min':190,'pha_max':284,'nbins':64,'xlim':[190,284],'name':'Tl208'}
 DICT_INITPAR_K40 = {'peak':132,'sigma':5,'area':18025,'c0':3731,'c1':-21.0,'MeV':PEAK_MEV_K40,'pha_min':100,'pha_max':164,'nbins':64,'xlim':[100,164],'name':'K40'}
 
-DICT_EXTRACT_CURVE = {'tbin':5.0,'tstart':0.0,'tstop':3600.0,'energy_min':3.0,'energy_max':None,'xlim':[0.0,3600.0]}
+DICT_EXTRACT_CURVE = {'tbin':8.0,'tstart':0.0,'tstop':3600.0,'energy_min':3.0,'energy_max':None,'xlim':[0.0,3600.0]}
 DICT_SEARCH_BURST = DICT_EXTRACT_CURVE
-DICT_SEARCH_BURST['burst_sigma'] = 4.0
+DICT_SEARCH_BURST['threshold_sigma'] = 4.0
 DICT_FIT_BURST_CURVE = DICT_EXTRACT_CURVE
 DICT_FIT_BURST_CURVE['fit_nsigma'] = 8
 
 ##################################################
 # General function and classes 
 ##################################################
+
+def get_norm_probability(threshold,mean=0.0,standard_deviation=1.0):
+	return 1.0-norm.cdf(threshold,mean,standard_deviation)
 
 def plot_xydata(x,y,outpdf,yerr=None,model_x=None,model_y=None,
 		xlabel='X title',ylabel='Y title',title='Title',
@@ -85,15 +89,23 @@ def plot_xydata(x,y,outpdf,yerr=None,model_x=None,model_y=None,
 
 def plot_histogram(hist_x,hist_y,outpdf,hist_yerr=None,
 		xlabel='X title',ylabel='Y title',title='Title',
-		flag_xlog=False,flag_ylog=False,xlim=None):
+		flag_xlog=False,flag_ylog=False,xlim=None,
+		burst_mask=None):
 	fig, ax = plt.subplots(1,1, figsize=(11.69,8.27)) # A4 size, inich unit 
 	fontsize = 18 	
 
 	if hist_yerr is not None:
-		plt.errorbar(hist_x,hist_y,marker='',drawstyle='steps-mid')		
-		plt.errorbar(hist_x,hist_y,yerr=hist_yerr,marker='',drawstyle='steps-mid')
+		plt.errorbar(hist_x,hist_y,marker='',drawstyle='steps-mid',color='k')		
+		plt.errorbar(hist_x,hist_y,yerr=hist_yerr,marker='',drawstyle='steps-mid',color='k')
 	else:
-		plt.errorbar(hist_x,hist_y,marker='',drawstyle='steps-mid')
+		plt.errorbar(hist_x,hist_y,marker='',drawstyle='steps-mid',color='k')
+
+	if burst_mask is not None:
+		if hist_yerr is not None:
+			plt.errorbar(hist_x[burst_mask],hist_y[burst_mask],marker='',drawstyle='steps-mid',color='r')		
+			plt.errorbar(hist_x[burst_mask],hist_y[burst_mask],yerr=hist_yerr[burst_mask],marker='',drawstyle='steps-mid',color='r')
+		else:
+			plt.errorbar(hist_x[burst_mask],hist_y[burst_mask],marker='',drawstyle='steps-mid',color='r')		
 
 	plt.xlabel(xlabel, fontsize=fontsize)
 	plt.ylabel(ylabel, fontsize=fontsize)
@@ -116,11 +128,14 @@ def plot_histogram(hist_x,hist_y,outpdf,hist_yerr=None,
 
 	plt.savefig(outpdf)	
 
-def plot_fit_residual(hist_x,hist_y,model_x,model_y,outpdf,
+def plot_fit_residual(
+		hist_x,hist_y,model_x,model_y,outpdf,
 		hist_xerr=None,hist_yerr=None,
 		xlabel='X title',ylabel='Y title',title='Title',
-		flag_xlog=False,flag_ylog=False,xlim=None,
-		fit_xmin=None,fit_xmax=None,legend_text=''):
+		flag_xlog=False,flag_ylog=False,flag_hist=False,
+		xlim=None,
+		axvline_values=None,axvline_legends=None,
+		legend_text='',legend_loc='lower left'):
 
 	fig, axs = plt.subplots(2,1,figsize=(11.69,8.27), # A4 size, inich unit 
 		sharex=True,gridspec_kw={'hspace':0},tight_layout=True)
@@ -128,26 +143,43 @@ def plot_fit_residual(hist_x,hist_y,model_x,model_y,outpdf,
 	gs.update(hspace=0.0)
 
 	fontsize = 18
+	fontsize_legend = 16
 	plt.tight_layout()
 	plt.tick_params(labelsize=fontsize)
 	plt.rcParams["font.family"] = "serif"
 	plt.rcParams["mathtext.fontset"] = "dejavuserif"	
 
+	mask = hist_yerr > 0.0
+
 	axs[0] = plt.subplot(gs[0,0])
-	axs[0].errorbar(hist_x,hist_y,xerr=hist_xerr,yerr=hist_yerr,
-		marker='o',linestyle='None',color='k')
-	axs[0].plot(model_x,model_y,c='red',drawstyle='steps-mid')
+	if flag_hist:
+		axs[0].errorbar(hist_x,hist_y,
+			xerr=hist_xerr,yerr=hist_yerr,
+			marker=None,color='k',drawstyle='steps-mid')
+	else:
+		axs[0].errorbar(hist_x[mask],hist_y[mask],
+			xerr=hist_xerr[mask],yerr=hist_yerr[mask],
+			marker='o',linestyle='None',color='k')	
+	axs[0].plot(model_x,model_y,c='red',drawstyle='steps-mid',linewidth=2)
 	axs[0].set_ylabel(ylabel, fontsize=fontsize)
 	axs[0].set_xlim(xlim)
 	axs[0].set_title(title, fontsize=fontsize)	
 	axs[0].get_xaxis().set_visible(False)
-	axs[0].legend(title=legend_text,loc='lower left',fontsize=fontsize)
 
 	axs[1] = plt.subplot(gs[1])
-	axs[1].errorbar(hist_x,(hist_y-model_y)/model_y,yerr=hist_yerr/model_y,
-		marker='o',linestyle='None',color='k')
-	axs[1].axhline(y=0,ls='--',color='r')
-	axs[1].set_ylabel('(data-model)/model', fontsize=fontsize)
+	if hist_yerr is not None:
+		if flag_hist:
+			axs[1].errorbar(
+				hist_x[mask],(hist_y-model_y)[mask]/hist_yerr[mask],
+				xerr=hist_xerr[mask],yerr=1.0,
+				marker=None,linestyle='None',color='k')	
+		else:
+			axs[1].errorbar(
+				hist_x[mask],(hist_y-model_y)[mask]/hist_yerr[mask],
+				yerr=1.0,
+				marker='o',linestyle='None',color='k')			
+		axs[1].axhline(y=0,ls='--',color='r')
+		axs[1].set_ylabel('(data-model)/error', fontsize=fontsize)
 	axs[1].set_xlabel(xlabel, fontsize=fontsize)
 	axs[1].set_xlim(xlim)
 
@@ -158,16 +190,75 @@ def plot_fit_residual(hist_x,hist_y,model_x,model_y,outpdf,
 		#ax.grid(axis='both',which='minor', linestyle='--')	
 		ax.tick_params(axis="both", which='major', direction='in', length=5,labelsize=fontsize)
 		ax.tick_params(axis="both", which='minor', direction='in', length=3,labelsize=fontsize)
-		ax.axvline(fit_xmin,ls='--')
-		ax.axvline(fit_xmax,ls='--')
+		for value in axvline_values:
+			if axvline_legends is None:
+				ax.axvline(value,ls='--')				
+			else:
+				index = axvline_values.index(value)
+				ax.axvline(value,ls='--',label=axvline_legends[index])
+			
+	legend = axs[0].legend(title=legend_text,loc=legend_loc,fontsize=fontsize_legend)
+	legend.get_title().set_fontsize(fontsize_legend)
+	#axs[1].legend(title="(data-model)/error",loc="lower right")
 
+	fig.align_ylabels(axs)
 	plt.savefig(outpdf)	
+
+def model_gauss(x, peak, sigma, area):
+    return area * np.exp(-0.5*(x-peak)**2/sigma**2)/(np.sqrt(2*np.pi)*sigma) 
 
 def model_gauss_linear(x, peak, sigma, area, c0=0.0, c1=0.0):
     return area * np.exp(-0.5*(x-peak)**2/sigma**2)/(np.sqrt(2*np.pi)*sigma) + c0 + c1 * x
 
 def model_linear(x, c0=0.0, c1=0.0):
     return c0 + c1 * x
+
+def fit_gauss(x,y,par_init,error=None,fit_nsigma=3):
+
+	if error is not None:
+		chi2reg = Chi2Regression(model_gauss,x,y,error=error)
+	else:
+		chi2reg = Chi2Regression(model_gauss,x,y)	
+
+	fit = Minuit(chi2reg, 
+		peak=par_init['peak'],sigma=par_init['sigma'],area=par_init['area'],
+		limit_peak=(0,None),limit_sigma=(0,None),limit_area=(0,None))
+	fit.migrad()
+	fit.minos() 
+	#fit.print_param()
+
+	peak = fit.values[0]
+	sigma = fit.values[1]
+	fit_xmin = peak - fit_nsigma * sigma 
+	fit_xmax = peak + fit_nsigma * sigma 
+
+	flag = np.logical_and(x >= fit_xmin, x <= fit_xmax)
+	if error is not None:
+		chi2reg = Chi2Regression(model_gauss,x[flag],y[flag],error=error[flag])
+	else:
+		chi2reg = Chi2Regression(model_gauss,x[flag],y[flag])
+
+	fit = Minuit(chi2reg, 
+		peak=par_init['peak'],sigma=par_init['sigma'],area=par_init['area'])
+	fit.migrad()
+	fit.minos() 
+	fit.print_param()
+
+	par = {
+		'peak':fit.values[0],
+		'sigma':fit.values[1],
+		'area':fit.values[2],
+		'c0':0.0,
+		'c1':0.0,
+		'peak_err':fit.errors[0],
+		'sigma_err':fit.errors[1],
+		'area_err':fit.errors[2],
+		'c0_err':0.0,
+		'c1_err':0.0,
+		'fit_xmin':fit_xmin,
+		'fit_xmax':fit_xmax,
+		'fit_nsigma':fit_nsigma}
+	return par
 
 def fit_gauss_linear(x,y,par_init,error=None,fit_nsigma=3):
 
@@ -178,7 +269,8 @@ def fit_gauss_linear(x,y,par_init,error=None,fit_nsigma=3):
 
 	fit = Minuit(chi2reg, 
 		peak=par_init['peak'],sigma=par_init['sigma'],area=par_init['area'], 
-		c0=par_init['c0'], c1=par_init['c1'])
+		c0=par_init['c0'], c1=par_init['c1'],
+		limit_peak=(0,None),limit_sigma=(0,None),limit_area=(0,None))
 	fit.migrad()
 	fit.minos() 
 	#fit.print_param()
@@ -431,6 +523,7 @@ class EventData():
 
 	def set_outdir(self,outdir,flag_overwrite=True):
 		self.outdir = outdir 
+		sys.stdout.write('----- {} -----\n'.format(sys._getframe().f_code.co_name))
 
 		#outdir = 'out/%s' % evt.basename
 		if flag_overwrite:
@@ -532,12 +625,13 @@ class EventData():
 			outpdf=outpdf,
 			hist_xerr=phaspec.hist.xerr,hist_yerr=phaspec.hist.yerr,
 			xlabel='Channel',ylabel='Counts/bin',title=self.basename,
-			xlim=[par['peak']-5*par['sigma'],par['peak']+5*par['sigma']],
-			fit_xmin=par['fit_xmin'],fit_xmax=par['fit_xmax'],
+			xlim=[par['peak']-3.5*par['sigma'],par['peak']+3.5*par['sigma']],
+			axvline_values=[par['fit_xmin'],par['fit_xmax']],
 			legend_text=legend_text)
 		return par
 
 	def set_energy_calibration_curve(self,dict_par_K40,dict_par_Tl208):
+		sys.stdout.write('----- {} -----\n'.format(sys._getframe().f_code.co_name))
 
 		for par in [dict_par_K40,dict_par_Tl208]:
 			for strtype in ['','_err']:
@@ -559,6 +653,7 @@ class EventData():
 		self.param['pha2mev_c1'] = self.pha2mev_c1
 
 	def get_pha2mev_param(self,mev_array,pha_array,pha_err_array,title,outpdf):
+		sys.stdout.write('----- {} -----\n'.format(sys._getframe().f_code.co_name))
 
 		mev_diff = np.diff(mev_array)[0]
 		pha_diff = np.diff(pha_array)[0]
@@ -613,6 +708,8 @@ class EventData():
 			xlim=DICT_EXTRACT_CURVE['xlim']):
 		""" Energy in MeV unit
 		"""
+		sys.stdout.write('----- {} -----\n'.format(sys._getframe().f_code.co_name))
+
 		mask, message, suffix = self.get_energy_mask(
 			energy_min=energy_min,energy_max=energy_max)
 
@@ -625,14 +722,14 @@ class EventData():
 		lc.plot(outpdf=outpdf,title=title,xlim=xlim)		
 
 	def search_burst(self,
+			threshold_sigma=DICT_SEARCH_BURST['threshold_sigma'],
 			tbin=DICT_SEARCH_BURST['tbin'],
 			tstart=DICT_SEARCH_BURST['tstart'],
 			tstop=DICT_SEARCH_BURST['tstop'],
 			energy_min=DICT_SEARCH_BURST['energy_min'],
-			energy_max=DICT_SEARCH_BURST['energy_max'],
-			xlim=DICT_SEARCH_BURST['burst_sigma']):
-		""" Energy in MeV unit
-		"""
+			energy_max=DICT_SEARCH_BURST['energy_max']):
+		sys.stdout.write('----- {} -----\n'.format(sys._getframe().f_code.co_name))
+
 		mask, message, suffix = self.get_energy_mask(
 			energy_min=energy_min,energy_max=energy_max)
 
@@ -641,34 +738,34 @@ class EventData():
 			float(self.unixtime_offset),
 			tbin=tbin,tstart=tstart,tstop=tstop)
 
-		xhigh = round(1.2*max(lc.hist.y))-0.5
-		self.cnt_hist = Hist1D(nbins=int(xhigh),xlow=-0.5,xhigh=xhigh)
-		self.cnt_hist.fill(lc.hist.y)
+		self.par_curve_stat = lc.set_curve_statistics(
+			threshold_sigma=threshold_sigma,
+			outpdf='%s/%s_cnthist_gaussfit.pdf' % (self.outdir,self.basename),
+			title='%s Burst search (%s) %d-sigma' % (self.basename, message, threshold_sigma)
+			)
 
-		title = 'rate histogram'
-		outpdf = '%s/test.pdf' % self.outdir
-		plot_histogram(
-			self.cnt_hist.x,self.cnt_hist.y,
-			outpdf=outpdf,hist_yerr=None,
-			xlabel='Counts/bin',
-			ylabel='Number of events',title=title,
-			flag_xlog=False,flag_ylog=False,xlim=None)	
+		threshold_count = self.par_curve_stat['peak'] + threshold_sigma * self.par_curve_stat['sigma']
+		self.par_curve_stat['threshold_sigma'] = threshold_sigma	
+		self.par_curve_stat['threshold_count'] = threshold_count
 
-		print("---------")
-		peak = np.mean(lc.hist.y)
-		sigma = np.std(lc.hist.y)
-		area = np.sum(lc.hist.y)
-		dict_initpar = {'peak':peak,'sigma':sigma,'area':area,
-			'c0':0,'c1':0,'fit_xmin':-0.5,'fit_xmax':xhigh}
-		par = fit_gauss_linear(self.cnt_hist.x,self.cnt_hist.y,
-			par_init=dict_initpar,error=None,fit_nsigma=5)
-		print(par)
-		#print("---------")
-		#print(lc.hist.y)
-#		title = '%s (%s)' % (self.basename, message)
-#		outpdf = '%s/%s_lc_%s.pdf' % (self.outdir,self.basename,suffix)
-#		lc.plot(outpdf=outpdf,title=title,xlim=xlim)		
+		burst_mask = (lc.hist.y >= threshold_count)
+		self.par_curve_stat['burst_time'] = lc.hist.x[burst_mask]
 
+		print(self.par_curve_stat)
+
+		lc.plot_burst_mask(
+			burst_mask=burst_mask,
+			outpdf='%s/%s_lc_%s_bst.pdf' % (self.outdir,self.basename,suffix),
+			title='%s burst search (%s) %d-sigma' % (self.basename, message, threshold_sigma))	
+
+		gti_start_index = np.argwhere(burst_mask[:-1] < burst_mask[1:]).squeeze() # [False,True] transition
+		gti_stop_index = np.argwhere(burst_mask[:-1] > burst_mask[1:]).squeeze() # [False,True] transition
+		print("gti_start_index",gti_start_index)
+		print("gti_stop_index",gti_stop_index)
+		print(lc.hist.x[gti_start_index])
+		print(lc.hist.x[gti_start_index]-tbin*0.5)
+
+	"""
 	def fit_burst_curve(self,
 			tbin=DICT_FIT_BURST_CURVE['tbin'],
 			tstart=DICT_FIT_BURST_CURVE['tstart'],
@@ -676,8 +773,9 @@ class EventData():
 			energy_min=DICT_FIT_BURST_CURVE['energy_min'],
 			energy_max=DICT_FIT_BURST_CURVE['energy_max'],
 			fit_nsigma=DICT_FIT_BURST_CURVE['fit_nsigma']):
-		""" Energy in MeV unit
-		"""
+
+		sys.stdout.write('----- {} -----\n'.format(sys._getframe().f_code.co_name))
+
 		mask, message, suffix = self.get_energy_mask(energy_min=energy_min,energy_max=energy_max)
 
 		lc = LightCurve(np.array(self.df[mask]['unixtime']),float(self.unixtime_offset),
@@ -695,16 +793,9 @@ class EventData():
 		model_y = np.array([model_gauss_linear(x,peak=par['peak'],sigma=par['sigma'],area=par['area'],
 			c0=par['c0'],c1=par['c1']) for x in model_x])	
 
-		"""
-		legend_text = '%s (fit range: %d sigma)\n' % (self.basename,par['fit_nsigma'])
-		legend_text += 'peak=%.1f+/-%.1f ch\n' % (par['peak'],par['peak_err'])
+		legend_text  = 'peak=%.1f+/-%.1f ch\n' % (par['peak'],par['peak_err'])
 		legend_text += 'sigma=%.1f+/-%.1f ch\n' % (par['sigma'],par['sigma_err'])		
 		legend_text += 'area=%.1f+/-%.1f counts\n' % (par['area'],par['area_err'])
-		legend_text += 'c0=%.1f+/-%.1f counts\n' % (par['c0'],par['c0_err'])		
-		legend_text += 'c1=%.1f+/-%.1f counts\n' % (par['c1'],par['c1_err'])			
-		legend_text += 'resolution=%.1f %%' % (100.0*get_energy_resolution(par['peak'],par['sigma']))
-		"""
-		legend_text = ""
 		plot_fit_residual(
 			lc.hist.x, lc.hist.y,
 			model_x, model_y,			
@@ -715,10 +806,11 @@ class EventData():
 			ylabel='Counts / (%d sec)' % tbin,
 			title='%s (%s)' % (self.basename, message),
 			xlim=[par['fit_xmin'],par['fit_xmax']],
-			fit_xmin=par['peak']-3*par['sigma'],
-			fit_xmax=par['peak']+3*par['sigma'],
+			axvline_values=[par['peak']-3*par['sigma'],par['peak']+3*par['sigma']],
+			axvline_legends=[r"$-3\sigma$",r"$+3\sigma$"],			
 			legend_text=legend_text)
 		return par
+	"""
 
 	def get_burst_duration(self,par,tbin=1.0,tstart=0.0,tstop=500.0,
 		energy_min=3.0,energy_max=8.0,
@@ -821,7 +913,8 @@ class PhaSpectrum():
 			flag_xlog=False,flag_ylog=True,xlim=xlim)		
 
 	def fit_gauss_linear(self,par_init,flag_error=True,fit_nsigma=3):
-		par = fit_gauss_linear(self.hist.x,self.hist.y,par_init,error=self.hist.yerr,fit_nsigma=fit_nsigma)
+		par = fit_gauss_linear(self.hist.x,self.hist.y,
+			par_init,error=self.hist.yerr,fit_nsigma=fit_nsigma)
 		return par 
 
 class EnergySpectrum():
@@ -869,6 +962,56 @@ class LightCurve():
 			xlabel='Time (sec) since %s JST' % self.time_offset_str,
 			ylabel='Counts / (%d sec)' % self.tbin,title=title,
 			flag_xlog=False,flag_ylog=False,xlim=xlim)	
+
+	def plot_burst_mask(self,burst_mask,outpdf,title='',xlim=[0.0,3600.0]):
+
+		plot_histogram(
+			self.hist.x,self.hist.y,
+			outpdf=outpdf,hist_yerr=self.hist.yerr,
+			xlabel='Time (sec) since %s JST' % self.time_offset_str,
+			ylabel='Counts / (%d sec)' % self.tbin,title=title,
+			flag_xlog=False,flag_ylog=False,xlim=xlim,
+			burst_mask=burst_mask)	
+
+	def set_curve_statistics(self,outpdf,title='',threshold_sigma=5.0):
+		sys.stdout.write('----- {} -----\n'.format(sys._getframe().f_code.co_name))
+
+		cnt_xlim_max = round(1.2*max(self.hist.y))
+		self.cnt_hist = Hist1D(nbins=int(cnt_xlim_max),
+			xlow=-0.5,xhigh=cnt_xlim_max-0.5)
+		self.cnt_hist.fill(self.hist.y)
+
+		peak = np.mean(self.hist.y)
+		sigma = np.std(self.hist.y)
+		area = np.sum(self.hist.y)
+		dict_initpar = {'peak':peak,'sigma':sigma,'area':area,
+			'fit_xmin':-0.5,'fit_xmax':cnt_xlim_max}
+		par = fit_gauss(self.cnt_hist.x,self.cnt_hist.y,
+			par_init=dict_initpar,error=None,fit_nsigma=5)
+		par['tbin'] = self.tbin
+		par['tstart'] = self.tstart
+		par['tstop'] = self.tstop
+
+		model_x = self.cnt_hist.x
+		model_y = np.array([model_gauss(x,peak=par['peak'],sigma=par['sigma'],area=par['area']) for x in model_x])			
+
+		legend_text  = 'peak=%.2f+/-%.2f\n' % (par['peak'],par['peak_err'])
+		legend_text += 'sigma=%.2f+/-%.2f\n' % (par['sigma'],par['sigma_err'])	
+		legend_text += 'area=%.1f+/-%.1f\n' % (par['area'],par['area_err'])
+		plot_fit_residual(
+			self.cnt_hist.x, self.cnt_hist.y,
+			model_x, model_y,			
+			hist_xerr=self.cnt_hist.xerr,
+			hist_yerr=self.cnt_hist.yerr,
+			outpdf=outpdf, 
+			xlabel='Counts / (%.1f sec bin)' % self.tbin,
+			ylabel='Number of bins',
+			title=title, 
+			xlim=[-0.5,cnt_xlim_max-0.5],
+			axvline_values=[par['peak']-threshold_sigma*par['sigma'],par['peak']+threshold_sigma*par['sigma']],
+			axvline_legends=[r"$-%d\sigma$" % threshold_sigma,r"$+%d\sigma$ (prob.=%.2e)" % (threshold_sigma,get_norm_probability(threshold_sigma))],
+			legend_text=legend_text,legend_loc='upper right')
+		return par
 
 	def fit_gauss_linear(self,par_init,flag_error=True,fit_nsigma=3):
 		par = fit_gauss_linear(self.hist.x,self.hist.y,par_init,error=self.hist.yerr,fit_nsigma=fit_nsigma)

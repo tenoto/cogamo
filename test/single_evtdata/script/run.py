@@ -17,7 +17,7 @@ ENERGY_SPECTRUM_MAX = 12.0
 PEAK_MEV_K40 = 1.46083
 PEAK_MEV_TL208 = 2.61453
 
-DICT_INITPAR_TL208 = {'peak':236,'sigma':7,'area':2651,'c0':798.0,'c1':-3,'MeV':PEAK_MEV_TL208,'pha_min':220,'pha_max':284,'nbins':64,'xlim':[220,284],'name':'Tl208'}
+DICT_INITPAR_TL208 = {'peak':236,'sigma':7,'area':2651,'c0':798.0,'c1':-3,'MeV':PEAK_MEV_TL208,'pha_min':200,'pha_max':284,'nbins':83,'xlim':[200,284],'name':'Tl208'}
 DICT_INITPAR_K40 = {'peak':132,'sigma':5,'area':18025,'c0':3731,'c1':-21.0,'MeV':PEAK_MEV_K40,'pha_min':100,'pha_max':164,'nbins':64,'xlim':[100,164],'name':'K40'}
 
 DICT_EXTRACT_CURVE = {'tbin':5.0,'tstart':0.0,'tstop':3600.0,'energy_min':3.0,'energy_max':None,'xlim':[0.0,3600.0]}
