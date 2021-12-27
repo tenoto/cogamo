@@ -27,8 +27,11 @@ import PyPDF2
 
 MAX_PHA_CHANNEL = 2**10 - 1 		
 
-DICT_INITPAR_K40 = {'name':'K40','MeV':1.46083,'peak':132,'sigma':5,'area':18025,'c0':3731,'c1':-21.0,'pha_min':100,'pha_max':164,'binning':2,'xlim':[100,164]}
-DICT_INITPAR_TL208 = {'name':'Tl208','MeV':2.61453,'peak':236,'sigma':7,'area':2651,'c0':798.0,'c1':-3,'pha_min':190,'pha_max':284,'binning':2,'xlim':[190,284],}
+#DICT_INITPAR_K40 = {'name':'K40','MeV':1.46083,'peak':132,'sigma':5,'area':18025,'c0':3731,'c1':-21.0,'pha_min':100,'pha_max':164,'binning':2,'xlim':[100,164]}
+DICT_INITPAR_K40 = {'name':'K40','MeV':1.46083,'peak':132,'sigma':5,'area':18025,'c0':3731,'c1':-21.0,'pha_min':100,'pha_max':184,'binning':2,'xlim':[100,184]}
+#DICT_INITPAR_TL208 = {'name':'Tl208','MeV':2.61453,'peak':236,'sigma':7,'area':2651,'c0':798.0,'c1':-3,'pha_min':190,'pha_max':284,'binning':2,'xlim':[190,284],}
+#DICT_INITPAR_TL208 = {'name':'Tl208','MeV':2.61453,'peak':250,'sigma':7,'area':2651,'c0':798.0,'c1':-3,'pha_min':210,'pha_max':300,'binning':2,'xlim':[210,300],}
+DICT_INITPAR_TL208 = {'name':'Tl208','MeV':2.61453,'peak':220,'sigma':7,'area':2651,'c0':798.0,'c1':-3,'pha_min':190,'pha_max':284,'binning':2,'xlim':[190,284],}
 GAMMA_LINES = [DICT_INITPAR_K40,DICT_INITPAR_TL208]
 
 def model_gauss(x, peak, sigma, area):
@@ -169,10 +172,14 @@ class Hist1D(object):
 
 	def fit_gauss(self,par_init,flag_error=False,fit_nsigma=3):
 
+		mask = np.logical_and(self.x >= par_init["fit_xmin"], self.x <= par_init["fit_xmax"])
+
 		if flag_error:
-			chi2reg = Chi2Regression(model_gauss,self.x,self.y,error=self.yerr)
+			chi2reg = Chi2Regression(model_gauss,
+				self.x[mask],self.y[mask],error=self.yerr[mask])
 		else:
-			chi2reg = Chi2Regression(model_gauss,self.x,self.y)	
+			chi2reg = Chi2Regression(model_gauss,
+				self.x[mask],self.y[mask])	
 
 		fit = Minuit(chi2reg, 
 			peak=par_init['peak'],sigma=par_init['sigma'],area=par_init['area'],
@@ -195,7 +202,8 @@ class Hist1D(object):
 				self.x[mask],self.y[mask])
 
 		fit = Minuit(chi2reg, 
-			peak=par_init['peak'],sigma=par_init['sigma'],area=par_init['area'])
+			peak=par_init['peak'],sigma=par_init['sigma'],area=par_init['area'],
+			limit_peak=(0,None),limit_sigma=(0,None),limit_area=(0,None))
 		fit.migrad()
 		fit.minos() 
 		fit.print_param()
@@ -212,8 +220,8 @@ class Hist1D(object):
 			'bins':len(self.x),
 			'dof':len(self.x)-fit.nfit,
 			'rchi2':(fit.fval/(len(self.x)-fit.nfit)),
-			'fit_xmin':fit_xmin,
-			'fit_xmax':fit_xmax,
+			'fit_xmin':float(fit_xmin),
+			'fit_xmax':float(fit_xmax),
 			'fit_nsigma':fit_nsigma}
 		return par
 
@@ -272,8 +280,8 @@ class Hist1D(object):
 			'bins':len(self.x),
 			'dof':len(self.x)-fit.nfit,
 			'rchi2':(fit.fval/(len(self.x)-fit.nfit)),
-			'fit_xmin':fit_xmin,
-			'fit_xmax':fit_xmax,
+			'fit_xmin':float(fit_xmin),
+			'fit_xmax':float(fit_xmax),
 			'fit_nsigma':fit_nsigma}
 		return par
 
@@ -420,7 +428,7 @@ class LightCurve(Hist1D):
 			legend_title=legend_title,legend_loc=legend_loc,legend_fontsize=legend_fontsize,
 			mask=mask)
 
-	def set_gaussian_stat(self,outpdf,title='',threshold_sigma=5.0):
+	def set_gaussian_stat(self,outpdf,title='',threshold_sigma=4.0):
 		sys.stdout.write('----- {} -----\n'.format(sys._getframe().f_code.co_name))
 
 		ylim = round(1.2*max(self.y))
@@ -430,11 +438,22 @@ class LightCurve(Hist1D):
 		peak = np.mean(self.y)
 		sigma = np.std(self.y)
 		area = np.sum(self.y)
-		dict_initpar = {'peak':peak,'sigma':sigma,'area':area,'fit_xmin':-0.5,'fit_xmax':ylim}
-		par = self.cnt_hist.fit_gauss(par_init=dict_initpar,flag_error=None,fit_nsigma=3)
+		fit_xmax = peak + 3 * sigma
+		dict_initpar = {'peak':peak,'sigma':sigma,'area':area,'fit_xmin':-0.5,'fit_xmax':fit_xmax}
+		print(dict_initpar)
+		par = self.cnt_hist.fit_gauss(par_init=dict_initpar,flag_error=None,fit_nsigma=3)		
 		par['tbin'] = self.tbin
 		par['tstart'] = self.tstart
 		par['tstop'] = self.tstop
+
+		model_x = self.cnt_hist.x
+		model_y = np.array([model_gauss(x,peak=par['peak'],sigma=par['sigma'],area=par['area']) for x in model_x])	
+
+		self.cnt_hist.plot_fit_residual(model_x,model_y,outpdf,
+			xlabel='Count / (%d sec bin)' % self.tbin,
+			ylabel='Number of bins',
+			title='',flag_hist=True,
+			xlim=[-0.5,ylim-0.5])
 
 		return par
 
@@ -524,7 +543,7 @@ class EventData():
 		self.phaspec.write(outpdf,title=title,xlim=xlim)
 
 		self.pdflist.append(outpdf)
-		return self.phaspec
+		return outpdf
 
 	def prepare_energy_calibration(self):
 		self.line_MeV = []
@@ -560,6 +579,7 @@ class EventData():
 		phaspec = PhaSpectrum(self.df['pha'],
 			binning=binning,pha_min=pha_min,pha_max=pha_max)
 
+		peak = phaspec.x[np.argmax(phaspec.y)]
 		dict_initpar = {'peak':peak,'sigma':sigma,'area':area,'c0':c0,'c1':c1}		
 		par = phaspec.fit_gauss_linear(dict_initpar,flag_error=True,fit_nsigma=fit_nsigma)
 		print(par)
@@ -665,7 +685,7 @@ class EventData():
 		title = '%s (%d channel)' % (self.basename,nbins)
 		enespec.write(outpdf=outpdf,title=title,xlim=xlim)
 		self.pdflist.append(outpdf)			
-		return enespec
+		return outpdf 
 
 	def extract_curve(self,tbin=8.0,tstart=0.0,tstop=3600.0,
 			energy_min=3.0,energy_max=10.0,xlim=[0.0,3600.0]):
@@ -738,15 +758,71 @@ class EventData():
 
 		gti_start_index = np.argwhere(mask[:-1] < mask[1:]).squeeze() # [False,True] transition
 		gti_stop_index = np.argwhere(mask[:-1] > mask[1:]).squeeze() # [False,True] transition
-		self.bst_gti_start = np.array([lc.x[gti_start_index]-lc.tbin*0.5])
-		self.bst_gti_stop = np.array([lc.x[gti_stop_index]+lc.tbin*0.5])
+
+		if len(gti_start_index) > 1:
+			self.bst_gti_start = np.array([lc.x[gti_start_index]-lc.tbin*0.5][0])
+			self.bst_gti_stop = np.array([lc.x[gti_stop_index]+lc.tbin*0.5][0])
+		else:
+			self.bst_gti_start = np.array([lc.x[gti_start_index]-lc.tbin*0.5])
+			self.bst_gti_stop = np.array([lc.x[gti_stop_index]+lc.tbin*0.5])
 		self.numof_bst = len(self.bst_gti_start)
 		self.bst_list = []
 
 		for i in range(self.numof_bst):
-			self.bst_list.append(Burst(i+1,
-				self.bst_gti_start[i],self.bst_gti_stop[i]))
+			print(i+1,self.bst_gti_start[i],self.bst_gti_stop[i])
+			self.bst_list.append(
+				Burst(self,i+1,	self.bst_gti_start[i],self.bst_gti_stop[i]))
 
+	def plot_multi_curves(self,
+			tbin=8.0,tstart=0.0,tstop=3600.0,xlim=[0.0,3600.0],
+			ebands=[[None,1.0],[1.0,3.0],[3.0,10.0],[10.0,None]]):
+
+		lc_list = []
+		for i in range(len(ebands)):
+			emin = ebands[i][0]
+			emax = ebands[i][1]			
+			lc_list.append(self.extract_curve(
+				tbin=tbin,tstart=tstart,tstop=tstop,
+				energy_min=emin,energy_max=emax,xlim=xlim))
+
+		outpdf = '%s/%s_multiband_lc.pdf' % (self.outdir,self.basename)
+		fontsize = 20
+
+		fig, axs = plt.subplots(len(ebands),1, figsize=(8.27,11.69), 
+			sharex=True, gridspec_kw={'hspace': 0})
+		for i in range(len(ebands)):
+			emin = ebands[i][0]
+			emax = ebands[i][1]	
+			label = '%s-%s MeV' % (emin,emax)
+			#axs[i].errorbar(lc_list[i].x,lc_list[i].y,yerr=lc_list[i].yerr,
+			#	marker='',drawstyle='steps-mid',color='k')	
+			axs[i].step(lc_list[i].x,lc_list[i].y,
+				marker='',drawstyle='steps-mid',color='k',label=label)	
+			axs[i].set_ylabel(r"Count/(%d sec)" % tbin)
+			axs[i].legend(loc="upper right",fontsize=14)
+			axs[i].set_xlim(xlim[0],xlim[1])
+
+		axs[-1].set_xlabel('Time (sec) since %s JST' % lc_list[-1].time_offset_str)
+		axs[0].set_title(self.basename,fontsize=fontsize)
+
+		for ax in axs:
+			ax.label_outer()	
+			ax.minorticks_on()
+			ax.xaxis.grid(True)
+			ax.xaxis.grid(which='major', linestyle='--', color='#000000')
+			ax.xaxis.grid(which='minor', linestyle='-.')	
+			ax.tick_params(axis="both", which='major', direction='in', length=5)
+			ax.tick_params(axis="both", which='minor', direction='in', length=3)	
+
+		fig.align_ylabels(axs)
+		plt.tight_layout(pad=2)
+		plt.rcParams["font.family"] = "serif"
+		plt.rcParams["mathtext.fontset"] = "dejavuserif"	
+		plt.savefig(outpdf)
+
+		self.pdflist.append(outpdf)	
+
+		return outpdf
 
 	def analysis_bursts(self,energy_min=3.0,energy_max=10.0,
 		tbin=8.0,time_offset=150.0,fit_nsigma=3,tbin_cumlc=1.0):
@@ -755,22 +831,22 @@ class EventData():
 			energy_min=energy_min,energy_max=energy_max)
 
 		for bst in self.bst_list:
-			print("bst-%d" % bst.burst_id)
+			print("bst-%d" % bst.param["burst_id"])
 
-			tstart=max(bst.gti_start-time_offset,0)
-			tstop=min(bst.gti_stop+time_offset,3600)
+			tstart=max(bst.param["gti_start"]-time_offset,0)
+			tstop=min(bst.param["gti_stop"]+time_offset,3600)
 			lc = LightCurve(
 				np.array(self.df[mask]['unixtime']),
 				float(self.unixtime_offset),
 				tbin=tbin,tstart=tstart,tstop=tstop)
 
-			title = '%s (%s) burst-%d' % (self.basename, message, bst.burst_id)
-			outpdf = '%s/%s_bst%d_lc_%s.pdf' % (self.outdir,self.basename,bst.burst_id,suffix)
+			title = '%s (%s) burst-%d' % (self.basename, message, bst.param["burst_id"])
+			outpdf = '%s/%s_bst%02d_lc_%s.pdf' % (self.outdir,self.basename,bst.param["burst_id"],suffix)
 			lc.write(outpdf=outpdf,title=title,xlim=[tstart,tstop])	
 			self.pdflist.append(outpdf)	
 
 			peak = lc.x[np.argmax(lc.y)]
-			sigma = (bst.gti_stop - bst.gti_start)*0.3
+			sigma = (bst.param["gti_stop"] - bst.param["gti_start"])*0.3
 			area = sigma * max(lc.y) * 1.3
 			c0 = np.mean(lc.y[0:10])
 
@@ -779,11 +855,16 @@ class EventData():
 
 			par = lc.fit_gauss_linear(par,flag_error=True,fit_nsigma=fit_nsigma,flag_fit_nsigma=False)
 			print(par)
+			par["tbin"] = tbin
+			par["tbin_cumlc"] = tbin_cumlc			
+			par["energy_min"] = energy_min
+			par["energy_max"] = energy_max
+			bst.param["lcfit_param"] = par
 
 			model_x = lc.x
 			model_y = np.array([model_gauss_linear(x,peak=par['peak'],sigma=par['sigma'],area=par['area'],c0=par['c0'],c1=par['c1']) for x in model_x])	
 
-			outpdf = '%s/%s_bst%d_lcfit_%s.pdf' % (self.outdir,self.basename,bst.burst_id,suffix)
+			outpdf = '%s/%s_bst%02d_lcfit_%s.pdf' % (self.outdir,self.basename,bst.param["burst_id"],suffix)
 
 			legend_text = 'Burst light curve'
 
@@ -821,12 +902,12 @@ class EventData():
 			at90percent = cumlc.x[cumlc.ratio >= 0.9][0]
 			t80 = at90percent - at10percent
 			print(at10percent,at90percent,t80)
-			bst.t80 = t80 
-			bst.at10percent = at10percent
-			bst.at90percent = at90percent
+			bst.param["t80"] = float(t80)
+			bst.param["at10percent"] = float(at10percent)
+			bst.param["at90percent"] = float(at90percent)
 
-			title = '%s (%s) burst-%d' % (self.basename, message, bst.burst_id)
-			outpdf = '%s/%s_bst%d_cumlc_%s.pdf' % (self.outdir,self.basename,bst.burst_id,suffix)
+			title = '%s (%s) burst-%d' % (self.basename, message, bst.param["burst_id"])
+			outpdf = '%s/%s_bst%02d_cumlc_%s.pdf' % (self.outdir,self.basename,bst.param["burst_id"],suffix)
 			cumlc.write(outpdf=outpdf,title=title,xlim=[tstart,tstop],ylabel='Cumulative (%d sec)' % tbin_cumlc,
 				axvline_values=[at10percent,at90percent],
 				#axvline_legends=["10 percent","90 percent"],
@@ -835,6 +916,9 @@ class EventData():
 				legend_loc='upper left'
 				)	
 			self.pdflist.append(outpdf)	
+
+			bst.set_parameters()
+			bst.write_to_yamlfile()
 
 	def write_to_fitsfile(self,output_fitsfile=None,config_file=None,overwrite=True):
 		"""
@@ -911,12 +995,32 @@ class EventData():
 		merger.write(outpdf)
 		merger.close()
 
+		return outpdf 
+
 class Burst():
-	def __init__(self,burst_id,gti_start,gti_stop):
-		self.burst_id = burst_id
-		self.gti_start = gti_start
-		self.gti_stop = gti_stop
-		self.t80 = None
+	def __init__(self,eventdata,burst_id,gti_start,gti_stop):
+		self.param = {}
+		self.eventdata = eventdata
+		self.param["burst_id"] = burst_id
+		self.param["gti_start"] = float(gti_start)
+		self.param["gti_stop"] = float(gti_stop)
+
+		self.param["t80"] = None
+		self.param["at10percent"] = None
+		self.param["at90percent"] = None
+		self.param["lcfit_param"] = None
+
+	def set_parameters(self):	
+		self.param["unixtime_peak"] = float(self.eventdata.unixtime_offset) + float(self.param["lcfit_param"]["peak"])
+		self.param["jsttime_peak"] = datetime.fromtimestamp(self.param["unixtime_peak"])
+		self.param["filename"] = self.eventdata.filename
+		self.param["lcfit_param"]["ncount"] = float(self.param["lcfit_param"]["area"])/float(self.param["lcfit_param"]["tbin"])
+		self.param["lcfit_param"]["ncount_err"] = float(self.param["lcfit_param"]["area_err"])/float(self.param["lcfit_param"]["tbin"])		
+
+	def write_to_yamlfile(self):
+		yamlfile = '%s/%s_bst%02d.yaml' % (self.eventdata.outdir,self.eventdata.basename,self.param["burst_id"])
+		with open(yamlfile, "w") as wf:
+		    yaml.dump(self.param, wf,default_flow_style=False)		
 
 class Archive(object):
 	def __init__(self,parameter_yamlfile):
@@ -927,21 +1031,16 @@ class Archive(object):
 		self.dict = {
 			'detid':[],
 			'time':[],
-			'process': [],
-			'bstcand': [],
-			'bstlclink': [],
-			'bstlcfile': [],	
-			'bstdistlink': [],
-			'bstdistfile': [],	
-			'bstlc_mean':[],
-			'bstlc_sigma':[],
-			'bstlc_area':[],	
-			'bstalert_link': [],
-			'bstalert_file': [],
-			'lclink': [],
+			'all':[],
+			'allfile':[],
+			'lc': [],
 			'lcfile': [],
-			'phalink': [],
-			'phafile': [],
+			'pha': [],
+			'phafile': [],			
+			'spec': [],
+			'specfile': [],				
+			'process': [],
+			'bst': [],
 			'csvfile':[],
 			'csvpath':[],			
 			'csvlink':[]
@@ -954,7 +1053,8 @@ class Archive(object):
 		csv_filelst = sorted(glob.glob('%s/**/*.csv' % self.param['datadir'],
 			recursive=True))
 		for file_path in csv_filelst:
-			self.add(file_path)
+			if re.fullmatch(r'\d{3}_\d{8}_\d{2}.csv', os.path.basename(file_path)):
+				self.add(file_path)
 		print(csv_filelst)	
 
 	def add(self,file_path):
@@ -975,24 +1075,19 @@ class Archive(object):
 
 		self.dict['detid'].append(detid)
 		self.dict['time'].append(str_time)
+		self.dict['all'].append('--')
+		self.dict['allfile'].append('--')	
+		self.dict['lc'].append('--')
+		self.dict['lcfile'].append('--')			
+		self.dict['pha'].append('--')
+		self.dict['phafile'].append('--')	
+		self.dict['spec'].append('--')
+		self.dict['specfile'].append('--')						
 		self.dict['process'].append('--')
-		self.dict['bstcand'].append('--')
-		self.dict['bstlclink'].append('--')
-		self.dict['bstlcfile'].append('--')
-		self.dict['bstdistlink'].append('--')
-		self.dict['bstdistfile'].append('--')
-		self.dict['bstlc_mean'].append('--')
-		self.dict['bstlc_sigma'].append('--')
-		self.dict['bstlc_area'].append('--')				
+		self.dict['bst'].append('--')
 		self.dict['csvlink'].append('<a href="%s">%s</a>' % (file_path,filename))
 		self.dict['csvpath'].append(file_path)		
 		self.dict['csvfile'].append(filename)
-		self.dict['bstalert_link'].append('--')
-		self.dict['bstalert_file'].append('--')
-		self.dict['lclink'].append('--')
-		self.dict['lcfile'].append('--')			
-		self.dict['phalink'].append('--')
-		self.dict['phafile'].append('--')		
 		return 0 
 
 	def convert_to_dataframe(self):
@@ -1009,7 +1104,7 @@ class Archive(object):
 	
 		self.df.to_csv('%s/%s.csv' % (self.param['outdir'],self.param['archive_name']))
 
-		self.df.drop(['csvpath','csvfile','lcfile','phafile','bstlcfile','bstdistfile','bstalert_file'],axis=1).to_html('%s/%s.html' % (self.param['outdir'],self.param['archive_name']), render_links=True, escape=False)
+		self.df.drop(['csvpath','csvfile','lcfile','phafile','allfile','specfile'],axis=1).to_html('%s/%s.html' % (self.param['outdir'],self.param['archive_name']), render_links=True, escape=False)
 
 	def process(self,index):
 		print("[Archive %s] process index of %s" % (self.param['archive_name'],index))
@@ -1018,48 +1113,35 @@ class Archive(object):
 		evt = EventData(csvpath)
 		outdir = '%s/product/id%s/%s/%s/%s/%s' % (self.param['outdir'],evt.detid_str, evt.year, evt.month, evt.day, evt.hour_jst)
 		evt.set_outdir(outdir)
-		evt.extract_pha_spectrum(binning=2)
+
+		pdf = evt.extract_pha_spectrum(binning=2)
+		self.df.iloc[index]['pha'] = '<a href=\"../%s\">pdf</a>' % (pdf)
+		self.df.iloc[index]['phafile'] = pdf
+
 		evt.prepare_energy_calibration()
 		evt.set_energy_series()
 		evt.set_time_series()
-		evt.extract_energy_spectrum()
+		
+		pdf = evt.plot_multi_curves()
+		self.df.iloc[index]['lc'] = '<a href=\"../%s\">pdf</a>' % (pdf)
+		self.df.iloc[index]['lcfile'] = pdf
+
+		pdf = evt.extract_energy_spectrum()
+		self.df.iloc[index]['spec'] = '<a href=\"../%s\">pdf</a>' % (pdf)
+		self.df.iloc[index]['specfile'] = pdf
+
 		lc = evt.extract_curve()
 		evt.search_burst(lc,threshold_sigma=4.0)
+		self.df.iloc[index]['bst'] = '%d' % (len(evt.bst_list))
+
 		if evt.numof_bst > 0:
 			evt.analysis_bursts()
 		evt.show_summary()
 		evt.write_to_fitsfile()
 		evt.write_to_yamlfile()	
-		evt.pdfmerge()
 
-		"""
-		evt = EventData(csvpath)
-		if evt.filetype != 'rawcsv':
-			sys.stdout.write('Input file is not the rawcsv file format.')
-			return 0		
+		pdf = evt.pdfmerge()
+		self.df.iloc[index]['all'] = '<a href=\"../%s\">pdf</a>' % (pdf)
+		self.df.iloc[index]['allfile'] = pdf
 
-		outdir = '%s/product/id%s/%s/%s/%s/%s' % (self.param['outdir'],evt.detid_str, evt.year, evt.month, evt.day, evt.hour_jst)
-		evt.set_outdir(outdir)
-
-		evt.extract_pha_spectrum()
-		dict_par_Tl208 = evt.fit_pha_spectrum_line(DICT_INITPAR_TL208)
-		dict_par_K40 = evt.fit_pha_spectrum_line(DICT_INITPAR_K40)
-		evt.set_energy_calibration_curve(dict_par_K40,dict_par_Tl208)
-
-		evt.set_energy_series(
-			pha2mev_c0=evt.pha2mev_c0,
-			pha2mev_c1=evt.pha2mev_c1)
-		evt.set_time_series()
-
-		evt.extract_energy_spectrum()
-		evt.extract_curve()
-
-		# if burst was detected
-		par = evt.fit_burst_curve()		
-
-		evt.get_burst_duration(par,tbin=1.0,tstart=par['fit_xmin'],tstop=par['fit_xmax'],
-			energy_min=3.0,energy_max=None,linear_tbin_normalization=5.0)
-
-		evt.write_to_fitsfile()
-		evt.write_to_yamlfile()
-		"""
+		self.df.iloc[index]['process'] = 'DONE'
