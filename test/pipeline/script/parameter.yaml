@@ -1,0 +1,25 @@
+archive_name: cogamo_archive_211227
+datadir:  ../data/
+outdir: out
+plot_pha_spectrum_min: 0
+plot_pha_spectrum_max: 1024
+plot_pha_spectrum_nbin: 512
+plot_pha_spectrum_xmin: 15
+plot_pha_spectrum_xmax: 1024
+plot_energy_sorted_curves_tbin: 16.0
+plot_energy_sorted_curves_tmin: 0.0
+plot_energy_sorted_curves_tmax: 3600.0
+plot_energy_sorted_curves_bands: [[None,30],[30,100],[100,300],[300,None]]
+search_burst_tbin: 20.0
+search_burst_pha_min: 100
+search_burst_pha_max: None
+search_burst_hist_min: 0
+search_burst_hist_max: 2046 
+search_burst_hist_nbin: 256
+search_burst_threshold_sigma: 4
+burst_alert_tbin: 20
+burst_alert_pha_min: 100
+burst_alert_pha_max: None
+burst_alert_width: 18 # 20-sec bin, 20*18/60 = 6 min
+burst_alert_threshold: 20.0 #sigma
+
