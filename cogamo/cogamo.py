@@ -27,6 +27,52 @@ import PyPDF2
 
 MAX_PHA_CHANNEL = 2**10 - 1 		
 
+"""
+Response
+
+  No. Type     EXTNAME      BITPIX Dimensions(columns)      PCOUNT  GCOUNT
+ 
+   0  PRIMARY                 16     0                           0    1
+   1  BINTABLE MATRIX          8     8206(6) 592                 0    1
+ 
+      Column Name                Format     Dims       Units     TLMIN  TLMAX
+      1 ENERG_LO                   1E
+      2 ENERG_HI                   1E
+      3 N_GRP                      1I
+      4 F_CHAN                     1I
+      5 N_CHAN                     1I
+      6 MATRIX                     2048E
+ 
+   2  BINTABLE EBOUNDS         8     10(3) 2048                  0    1
+ 
+      Column Name                Format     Dims       Units     TLMIN  TLMAX
+      1 CHANNEL                    1I
+      2 E_MIN                      1E
+      3 E_MAX                      1E
+ 
+[MATRIX]
+Channel ENERG_LO ENERG_HI
+(ch)    (keV)    (keV)
+1       40       45 
+2      	45		 50
+3		50		 55
+...
+592		40800	 41000
+
+[EBOUNDS]
+Channel ENERG_LO ENERG_HI
+(ch)    (keV)    (keV)
+0       40       60
+1      	60		 80
+2		80		 100
+...
+2046	40960	 40980
+2047	40980	 41000
+
+ENERG_LO = 40 keV + 20 keV * i 
+ENERG_HI = 60 keV + 20 keV * i 
+"""
+
 #DICT_INITPAR_K40 = {'name':'K40','MeV':1.46083,'peak':132,'sigma':5,'area':18025,'c0':3731,'c1':-21.0,'pha_min':100,'pha_max':164,'binning':2,'xlim':[100,164]}
 DICT_INITPAR_K40 = {'name':'K40','MeV':1.46083,'peak':132,'sigma':5,'area':18025,'c0':3731,'c1':-21.0,'pha_min':100,'pha_max':184,'binning':2,'xlim':[100,184]}
 #DICT_INITPAR_TL208 = {'name':'Tl208','MeV':2.61453,'peak':236,'sigma':7,'area':2651,'c0':798.0,'c1':-3,'pha_min':190,'pha_max':284,'binning':2,'xlim':[190,284],}
@@ -82,6 +128,59 @@ def plot_xydata(x,y,outpdf,yerr=None,model_x=None,model_y=None,
 	plt.tight_layout()
 
 	plt.savefig(outpdf)	
+
+def extract_xspec_pha(energy_keV_array,outpha,exposure):
+	number_of_channel = 2048
+	energy_min = 40 # keV 
+	energy_step = 20 # keV 
+
+	energy_max = energy_min + energy_step * number_of_channel
+	hist = Hist1D(nbins=number_of_channel,xlow=energy_min,xhigh=energy_max)
+	hist.fill(energy_keV_array)
+
+	col_channel = fits.Column(name='CHANNEL',format="J", array=np.array([i for i in range(0,number_of_channel)]))
+	col_counts = fits.Column(name='COUNTS',format="J",unit="count",	array=hist.y)
+	hdu1 = fits.BinTableHDU.from_columns([col_channel,col_counts])
+	hdu1.name = 'SPECTRUM'
+
+	prhdu = fits.PrimaryHDU()
+	hdu = fits.HDUList([prhdu, hdu1])
+
+	hdu1.header['HDUCLASS'] = 'OGIP'
+	hdu1.header['HDUCLAS1'] = 'SPECTRUM'
+	hdu1.header['HDUVERS1'] = '1.2.0   '   	
+	hdu1.header['HDUVERS'] = '1.2.0   '
+	hdu1.header['TLMIN1']  = 0   
+	hdu1.header['TLMAX1']  = 2047
+	hdu1.header['TELESCOP']= 'thdr'
+	hdu1.header['INSTRUME']= 'CogamoCsI'
+	hdu1.header['FILTER']  = 'UNKNOWN '
+	hdu1.header['EXPOSURE'] = exposure 
+	hdu1.header['AREASCAL'] = 1.0 
+	hdu1.header['BACKFILE'] = 'NONE'
+	hdu1.header['BACKSCAL'] = 1.0
+	hdu1.header['ANCRFILE'] = 'NONE'
+	hdu1.header['CORRFILE'] = 'NONE'
+	hdu1.header['CORRSCAL'] = 1.0
+	hdu1.header['PHAVERSN'] = '1992a'
+	hdu1.header['CHANTYPE'] = 'PI'
+	hdu1.header['POISSERR'] = True 
+	hdu1.header['STAT_ERR'] = 0
+	hdu1.header['SYS_ERR'] = 0	
+
+	"""
+	for i in range(0,2):
+	  	for keyword,usrsetup in setup['keywords_common'].items():
+			hdu[i].header[keyword] = usrsetup[0]
+			hdu[i].header.comments[keyword] = usrsetup[1]
+		hdu[i].header["FILENAME"] = output_rmffile
+		hdu[i].header.comments[keyword] = "Filename"				
+	"""		
+	i = 1
+	hdu[i].header["DETCHANS"] = number_of_channel
+	#hdu[i].header.comments[keyword] = "total number of detector channels"
+
+	hdu.writeto(outpha)  
 
 class Hist1D(object):
 	"""Represents 1D histogram. 
@@ -644,6 +743,8 @@ class EventData():
 
 		self.pha2mev_c0 = - mev2pha_c0 / mev2pha_c1
 		self.pha2mev_c1 = 1 / mev2pha_c1
+		self.param['pha2mev_c0'] = self.pha2mev_c0
+		self.param['pha2mev_c1'] = self.pha2mev_c1		
 		return self.pha2mev_c0, self.pha2mev_c1
 
 	def set_time_series(self):		
@@ -756,15 +857,11 @@ class EventData():
 		lc.write(outpdf=outpdf,title=title,mask=mask)	
 		self.pdflist.append(outpdf)					
 
-		gti_start_index = np.argwhere(mask[:-1] < mask[1:]).squeeze() # [False,True] transition
-		gti_stop_index = np.argwhere(mask[:-1] > mask[1:]).squeeze() # [False,True] transition
+		gti_start_index = np.argwhere(mask[:-1] < mask[1:])[0] # [False,True] transition
+		gti_stop_index = np.argwhere(mask[:-1] > mask[1:])[0] # [False,True] transition
 
-		if len(gti_start_index) > 1:
-			self.bst_gti_start = np.array([lc.x[gti_start_index]-lc.tbin*0.5][0])
-			self.bst_gti_stop = np.array([lc.x[gti_stop_index]+lc.tbin*0.5][0])
-		else:
-			self.bst_gti_start = np.array([lc.x[gti_start_index]-lc.tbin*0.5])
-			self.bst_gti_stop = np.array([lc.x[gti_stop_index]+lc.tbin*0.5])
+		self.bst_gti_start = np.array([lc.x[gti_start_index]-lc.tbin*0.5])
+		self.bst_gti_stop = np.array([lc.x[gti_stop_index]+lc.tbin*0.5])
 		self.numof_bst = len(self.bst_gti_start)
 		self.bst_list = []
 
@@ -919,6 +1016,22 @@ class EventData():
 
 			bst.set_parameters()
 			bst.write_to_yamlfile()
+
+			mask_bst_time = np.logical_and(
+				self.df['unixtime'] >= float(self.unixtime_offset) + float(bst.param["at10percent"]),
+				self.df['unixtime'] < float(self.unixtime_offset) + float(bst.param["at90percent"]))
+			extract_xspec_pha(
+				energy_keV_array=np.array(self.df['energy_mev'][mask_bst_time]*1000.0),
+				exposure=float(bst.param['t80']),
+				outpha='src.pha')
+
+			mask_bgd_time = np.logical_and(
+				self.df['unixtime'] >= float(self.unixtime_offset) + float(bst.param["at90percent"] + 100 ),
+				self.df['unixtime'] < float(self.unixtime_offset) + float(bst.param["at90percent"] + 500))
+			extract_xspec_pha(
+				energy_keV_array=np.array(self.df['energy_mev'][mask_bst_time]*1000.0),
+				exposure=400.0,
+				outpha='bgd.pha')
 
 	def write_to_fitsfile(self,output_fitsfile=None,config_file=None,overwrite=True):
 		"""
