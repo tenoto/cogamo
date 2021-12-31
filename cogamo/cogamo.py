@@ -27,6 +27,8 @@ import PyPDF2
 
 MAX_PHA_CHANNEL = 2**10 - 1 		
 
+FIT_RETRY = 2
+
 """
 Response
 
@@ -182,6 +184,22 @@ def extract_xspec_pha(energy_keV_array,outpha,exposure):
 
 	hdu.writeto(outpha)  
 
+def run(param_yamlfile):
+	pipe = Pipeline(param_yamlfile)
+	pipe.write()
+
+	cat = Catalog(param_yamlfile)
+	cat.write()
+
+	pipe.set_catalog(cat)
+	for index in range(len(pipe.df)):
+		try:
+			pipe.process(index)
+			pipe.write()
+		except:
+			continue	
+	print("DONE!!")
+
 class Hist1D(object):
 	"""Represents 1D histogram. 
 	"""
@@ -283,7 +301,13 @@ class Hist1D(object):
 		fit = Minuit(chi2reg, 
 			peak=par_init['peak'],sigma=par_init['sigma'],area=par_init['area'],
 			limit_peak=(0,None),limit_sigma=(0,None),limit_area=(0,None))
-		fit.migrad()
+		for i in range(1,FIT_RETRY+1):
+			try:
+				fit_valid = fit.migrad()
+				if fit_valid:
+					break 
+			except:
+				print("fit error %s" % fit_valid)
 		fit.minos()
 		fit.print_param()
 
@@ -303,7 +327,13 @@ class Hist1D(object):
 		fit = Minuit(chi2reg, 
 			peak=par_init['peak'],sigma=par_init['sigma'],area=par_init['area'],
 			limit_peak=(0,None),limit_sigma=(0,None),limit_area=(0,None))
-		fit.migrad()
+		for i in range(1,FIT_RETRY+1):
+			try:
+				fit_valid = fit.migrad()
+				if fit_valid:
+					break 
+			except:
+				print("fit error %s" % fit_valid)		
 		fit.minos() 
 		fit.print_param()
 
@@ -834,7 +864,7 @@ class EventData():
 
 		return mask, message, suffix 	
 
-	def search_burst(self,lc,threshold_sigma=4.0):
+	def search_burst(self,lc,threshold_sigma=4.0,catalog=None):
 		sys.stdout.write('----- {} -----\n'.format(sys._getframe().f_code.co_name))
 
 		self.par_curve_stat = lc.set_gaussian_stat(
@@ -868,7 +898,7 @@ class EventData():
 		for i in range(self.numof_bst):
 			print(i+1,self.bst_gti_start[i],self.bst_gti_stop[i])
 			self.bst_list.append(
-				Burst(self,i+1,	self.bst_gti_start[i],self.bst_gti_stop[i]))
+				Burst(self,i+1,	self.bst_gti_start[i],self.bst_gti_stop[i],catalog=catalog))
 
 	def plot_multi_curves(self,
 			tbin=8.0,tstart=0.0,tstop=3600.0,xlim=[0.0,3600.0],
@@ -961,7 +991,7 @@ class EventData():
 			model_x = lc.x
 			model_y = np.array([model_gauss_linear(x,peak=par['peak'],sigma=par['sigma'],area=par['area'],c0=par['c0'],c1=par['c1']) for x in model_x])	
 
-			outpdf = '%s/%s_bst%02d_lcfit_%s.pdf' % (self.outdir,self.basename,bst.param["burst_id"],suffix)
+			bst.lcfit_outpdf = '%s/%s_bst%02d_lcfit_%s.pdf' % (self.outdir,self.basename,bst.param["burst_id"],suffix)
 
 			legend_text = 'Burst light curve'
 
@@ -975,7 +1005,7 @@ class EventData():
 			fit_range_max = par['peak'] + fit_nsigma * par['sigma']	
 			lc.plot_fit_residual(
 				model_x,model_y,
-				outpdf,
+				bst.lcfit_outpdf,
 				flag_hist=True,
 				xlabel='Time (sec) since %s JST' % lc.time_offset_str,
 				ylabel='Counts / (%d sec)' % lc.tbin,				
@@ -985,7 +1015,7 @@ class EventData():
 				legend_text=legend_text,legend_loc='upper right',
 				xlim=[tstart,tstop]
 				)
-			self.pdflist.append(outpdf)	
+			self.pdflist.append(bst.lcfit_outpdf)	
 
 			cumlc = LightCurve(
 				np.array(self.df[mask]['unixtime']),
@@ -1004,34 +1034,107 @@ class EventData():
 			bst.param["at90percent"] = float(at90percent)
 
 			title = '%s (%s) burst-%d' % (self.basename, message, bst.param["burst_id"])
-			outpdf = '%s/%s_bst%02d_cumlc_%s.pdf' % (self.outdir,self.basename,bst.param["burst_id"],suffix)
-			cumlc.write(outpdf=outpdf,title=title,xlim=[tstart,tstop],ylabel='Cumulative (%d sec)' % tbin_cumlc,
+			bst.cumlc_outpdf = '%s/%s_bst%02d_cumlc_%s.pdf' % (self.outdir,self.basename,bst.param["burst_id"],suffix)
+			cumlc.write(outpdf=bst.cumlc_outpdf,title=title,xlim=[tstart,tstop],ylabel='Cumulative (%d sec)' % tbin_cumlc,
 				axvline_values=[at10percent,at90percent],
 				#axvline_legends=["10 percent","90 percent"],
 				axhline_values=[0.1*cumlc.y[-1],0.9*cumlc.y[-1],cumlc.y[-1]],
 				#axhline_legends=["10%","90%","100%"],
 				legend_loc='upper left'
 				)	
-			self.pdflist.append(outpdf)	
-
-			bst.set_parameters()
-			bst.write_to_yamlfile()
+			self.pdflist.append(bst.cumlc_outpdf)	
 
 			mask_bst_time = np.logical_and(
 				self.df['unixtime'] >= float(self.unixtime_offset) + float(bst.param["at10percent"]),
 				self.df['unixtime'] < float(self.unixtime_offset) + float(bst.param["at90percent"]))
+			src_outpha = '%s/%s_bst%02d_src.pha' % (self.outdir,self.basename,bst.param["burst_id"])
 			extract_xspec_pha(
 				energy_keV_array=np.array(self.df['energy_mev'][mask_bst_time]*1000.0),
 				exposure=float(bst.param['t80']),
-				outpha='src.pha')
+				outpha=src_outpha)
 
+			if float(bst.param["lcfit_param"]['peak']) < 1500.0:
+				bgd_tstart = 200
+				bgd_tstop = 800			
+			else:
+				bgd_tstart = -800
+				bgd_tstop = -200			
 			mask_bgd_time = np.logical_and(
-				self.df['unixtime'] >= float(self.unixtime_offset) + float(bst.param["at90percent"] + 100 ),
-				self.df['unixtime'] < float(self.unixtime_offset) + float(bst.param["at90percent"] + 500))
+				self.df['unixtime'] >= float(self.unixtime_offset) + float(bst.param["at90percent"] + bgd_tstart ),
+				self.df['unixtime'] < float(self.unixtime_offset) + float(bst.param["at90percent"] + bgd_tstop))
+			bgd_outpha = '%s/%s_bst%02d_bgd.pha' % (self.outdir,self.basename,bst.param["burst_id"])
 			extract_xspec_pha(
-				energy_keV_array=np.array(self.df['energy_mev'][mask_bst_time]*1000.0),
-				exposure=400.0,
-				outpha='bgd.pha')
+				energy_keV_array=np.array(self.df['energy_mev'][mask_bgd_time]*1000.0),
+				exposure=bgd_tstop-bgd_tstart,
+				outpha=bgd_outpha)
+
+			src_bin_outpha = '%s/%s_bst%02d_src_bin.pha' % (self.outdir,self.basename,bst.param["burst_id"])
+			script_bin = '%s/%s_bst%02d_grpbin.sh' % (self.outdir,self.basename,bst.param["burst_id"])
+
+			pi_min = 2
+			pi_max = 497 # 10 MeV 
+			nbin = 26
+			f = open(script_bin,'w')
+			dump  = '#!/bin/sh -f\n\n'
+			dump += 'grppha << EOF\n'
+			dump += '%s\n' % src_outpha
+			dump += '%s\n' % src_bin_outpha
+			tmp_float_pi = np.logspace(
+				np.log10(pi_min-1), np.log10(pi_max), nbin, base=10)
+			for i in range(len(tmp_float_pi)-1):
+				p0 = int(round(tmp_float_pi[i]))+1
+				p1 = int(round(tmp_float_pi[i+1]))
+				binsize = p1 - p0 + 1 
+				dump += 'group %d %d %d\n' % (p0, p1, binsize)
+			dump += 'group 498 2047 1550\n'
+			dump += 'exit\n'
+			print(dump)
+			f.write(dump)
+			f.close()			
+			
+			cmd = 'chmod +x %s' % script_bin
+			os.system(cmd)
+			os.system('./%s' % script_bin)
+
+			sub_outps = '%s/%s_bst%02d_sub.ps' % (self.outdir,self.basename,bst.param["burst_id"])
+			sub_outpdf = '%s/%s_bst%02d_sub.pdf' % (self.outdir,self.basename,bst.param["burst_id"])
+
+			cmd  = 'xspec << EOF\n'
+			cmd += 'data 1 %s\n' % src_bin_outpha
+			cmd += 'resp 1 ../../cogamo/growth-bgo.rsp\n'
+			cmd += 'back 1 %s\n' % bgd_outpha
+			cmd += 'setp rebin 0 1\n'
+			cmd += 'setplot energy mev\n'
+			cmd += 'ignore **-0.2\n'
+			cmd += 'iplot ld\n'
+			cmd += 'lwid 5\n'
+			cmd += 'lwid 5\n'
+			cmd += 'lwid 5 on 1..100\n'			
+			cmd += 'time off\n'
+			cmd += 'la t %s Bst-ID %s\n' % (self.basename,bst.param["burst_id"])
+			cmd += 'la y Counts sec\\u-1\\d MeV\\u-1\\d\n'
+			cmd += 'lab rotate\n'
+			cmd += 'r x 0.2 40.0\n'
+			cmd += 'hard %s/cps\n' % sub_outps			
+			cmd += 'exit\n'
+			cmd += 'exit\n'			
+			cmd += 'EOF\n'
+			print(cmd)
+			fcmd = '%s/%s_bst%02d_sub.xcm' % (self.outdir,self.basename,bst.param["burst_id"])
+			f = open(fcmd,'w')
+			f.write(cmd)
+			f.close()
+
+			os.system(cmd)
+			os.system('ps2pdf %s' % sub_outps)
+			os.system('mv %s %s' % (os.path.basename(sub_outpdf),self.outdir))
+			bst.subspec_pdf = sub_outpdf
+
+			self.pdflist.append(sub_outpdf)	
+
+			bst.set_parameters()
+			bst.write_to_yamlfile()
+			bst.add_to_catalog()
 
 	def write_to_fitsfile(self,output_fitsfile=None,config_file=None,overwrite=True):
 		"""
@@ -1111,7 +1214,7 @@ class EventData():
 		return outpdf 
 
 class Burst():
-	def __init__(self,eventdata,burst_id,gti_start,gti_stop):
+	def __init__(self,eventdata,burst_id,gti_start,gti_stop,catalog=None):
 		self.param = {}
 		self.eventdata = eventdata
 		self.param["burst_id"] = burst_id
@@ -1123,23 +1226,44 @@ class Burst():
 		self.param["at90percent"] = None
 		self.param["lcfit_param"] = None
 
+		self.catalog = catalog 
+
+	def set_catalog(self,catalog):
+		self.catalog = catalog
+
 	def set_parameters(self):	
 		self.param["unixtime_peak"] = float(self.eventdata.unixtime_offset) + float(self.param["lcfit_param"]["peak"])
 		self.param["jsttime_peak"] = datetime.fromtimestamp(self.param["unixtime_peak"])
 		self.param["filename"] = self.eventdata.filename
 		self.param["lcfit_param"]["ncount"] = float(self.param["lcfit_param"]["area"])/float(self.param["lcfit_param"]["tbin"])
-		self.param["lcfit_param"]["ncount_err"] = float(self.param["lcfit_param"]["area_err"])/float(self.param["lcfit_param"]["tbin"])		
+		self.param["lcfit_param"]["ncount_err"] = float(self.param["lcfit_param"]["area_err"])/float(self.param["lcfit_param"]["tbin"])	
+		self.param["detid_str"]	= self.eventdata.detid_str
 
 	def write_to_yamlfile(self):
 		yamlfile = '%s/%s_bst%02d.yaml' % (self.eventdata.outdir,self.eventdata.basename,self.param["burst_id"])
 		with open(yamlfile, "w") as wf:
 		    yaml.dump(self.param, wf,default_flow_style=False)		
 
-class Archive(object):
+	def add_to_catalog(self):
+		self.catalog.dict['peaktime'].append(self.param["jsttime_peak"])
+		self.catalog.dict['t80'].append(self.param["t80"])
+		self.catalog.dict['ncount'].append(self.param["lcfit_param"]["ncount"])	
+		self.catalog.dict['ncount_err'].append(self.param["lcfit_param"]["ncount_err"])
+		self.catalog.dict['detid'].append(self.param["detid_str"])
+		self.catalog.dict['filename'].append(self.param["filename"])
+		self.catalog.dict['lc'].append('<a href="../%s">pdf</a>' % self.eventdata.multilc_pdf)	
+		self.catalog.dict['spec'].append('<a href="../%s">pdf</a>' % self.subspec_pdf)	
+		self.catalog.dict['cumlc'].append('<a href="../%s">pdf</a>' % self.cumlc_outpdf)	
+		self.catalog.dict['lcfit'].append('<a href="../%s">pdf</a>' % self.lcfit_outpdf)
+		self.catalog.write()
+
+class Pipeline(object):
 	def __init__(self,parameter_yamlfile):
 		self.param = yaml.load(open(parameter_yamlfile),
 			Loader=yaml.FullLoader)		
-		print("[Archive] %s is generatd." % self.param['archive_name'])
+		print("[Pipeline] %s is generatd." % self.param['pipeline_name'])
+
+		self.catalog = None 
 
 		self.dict = {
 			'detid':[],
@@ -1159,10 +1283,16 @@ class Archive(object):
 			'csvlink':[]
 			}
 
-	def set_csvfiles(self):
-		sys.stdout.write('[archive] {} \n'.format(sys._getframe().f_code.co_name))
+		self.set_csvfiles()
+		self.convert_dict2df()
 
-		### Find CSV file and make archives. 
+	def set_catalog(self,catalog):
+		self.catalog = catalog 
+
+	def set_csvfiles(self):
+		sys.stdout.write('[Pipeline] {} \n'.format(sys._getframe().f_code.co_name))
+
+		### Find CSV file and make pipelines. 
 		csv_filelst = sorted(glob.glob('%s/**/*.csv' % self.param['datadir'],
 			recursive=True))
 		for file_path in csv_filelst:
@@ -1171,7 +1301,7 @@ class Archive(object):
 		print(csv_filelst)	
 
 	def add(self,file_path):
-		print("[Archive %s] add %s" % (self.param['archive_name'],file_path))
+		print("[Pipeline %s] add %s" % (self.param['pipeline_name'],file_path))
 
 		filename = os.path.basename(file_path)	
 		basename, ext = os.path.splitext(filename)
@@ -1201,26 +1331,28 @@ class Archive(object):
 		self.dict['csvlink'].append('<a href="%s">%s</a>' % (file_path,filename))
 		self.dict['csvpath'].append(file_path)		
 		self.dict['csvfile'].append(filename)
-		return 0 
 
-	def convert_to_dataframe(self):
-		self.df = pd.DataFrame.from_dict(self.dict, orient='index').T
-		#self.df = self.df.shift()[1:] # shift index starting from 0 to 1	
-
-	def write(self):
 		if not os.path.exists(self.param['outdir']):
 			cmd = 'mkdir -p %s' % self.param['outdir']
 			print(cmd);os.system(cmd)
 
-		cmd = 'rm -f %s/%s.{csv,html}' % (self.param['outdir'],self.param['archive_name'])
+		return 0 
+
+	def convert_dict2df(self):
+		self.df = pd.DataFrame.from_dict(self.dict, orient='index').T
+
+	def write(self):
+
+		cmd = 'rm -f %s/%s.{csv,html}' % (self.param['outdir'],self.param['pipeline_name'])
 		print(cmd);os.system(cmd)
 	
-		self.df.to_csv('%s/%s.csv' % (self.param['outdir'],self.param['archive_name']))
 
-		self.df.drop(['csvpath','csvfile','lcfile','phafile','allfile','specfile'],axis=1).to_html('%s/%s.html' % (self.param['outdir'],self.param['archive_name']), render_links=True, escape=False)
+		self.df.to_csv('%s/%s.csv' % (self.param['outdir'],self.param['pipeline_name']))
+
+		self.df.drop(['csvpath','csvfile','lcfile','phafile','allfile','specfile'],axis=1).to_html('%s/%s.html' % (self.param['outdir'],self.param['pipeline_name']), render_links=True, escape=False)
 
 	def process(self,index):
-		print("[Archive %s] process index of %s" % (self.param['archive_name'],index))
+		print("[Pipeline %s] process index of %s" % (self.param['pipeline_name'],index))
 
 		csvpath = self.df.iloc[index]['csvpath']
 		evt = EventData(csvpath)
@@ -1235,16 +1367,16 @@ class Archive(object):
 		evt.set_energy_series()
 		evt.set_time_series()
 		
-		pdf = evt.plot_multi_curves()
-		self.df.iloc[index]['lc'] = '<a href=\"../%s\">pdf</a>' % (pdf)
-		self.df.iloc[index]['lcfile'] = pdf
+		evt.multilc_pdf = evt.plot_multi_curves()
+		self.df.iloc[index]['lc'] = '<a href=\"../%s\">pdf</a>' % (evt.multilc_pdf)
+		self.df.iloc[index]['lcfile'] = evt.multilc_pdf
 
-		pdf = evt.extract_energy_spectrum()
-		self.df.iloc[index]['spec'] = '<a href=\"../%s\">pdf</a>' % (pdf)
-		self.df.iloc[index]['specfile'] = pdf
+		evt.spec_pdf = evt.extract_energy_spectrum()
+		self.df.iloc[index]['spec'] = '<a href=\"../%s\">pdf</a>' % (evt.spec_pdf)
+		self.df.iloc[index]['specfile'] = evt.spec_pdf
 
 		lc = evt.extract_curve()
-		evt.search_burst(lc,threshold_sigma=4.0)
+		evt.search_burst(lc,threshold_sigma=self.param['burst_treshold_sigma'],catalog=self.catalog)
 		self.df.iloc[index]['bst'] = '%d' % (len(evt.bst_list))
 
 		if evt.numof_bst > 0:
@@ -1258,3 +1390,37 @@ class Archive(object):
 		self.df.iloc[index]['allfile'] = pdf
 
 		self.df.iloc[index]['process'] = 'DONE'
+
+class Catalog(object):
+	def __init__(self,parameter_yamlfile):
+		self.param = yaml.load(open(parameter_yamlfile),
+			Loader=yaml.FullLoader)		
+		print("[Catalog] %s is generatd." % self.param['bstcatalog_name'])
+
+		self.htmlfile = '%s/%s.html' % (self.param['outdir'],self.param['bstcatalog_name'])
+		self.csvfile = '%s/%s.csv' % (self.param['outdir'],self.param['bstcatalog_name'])		
+		self.outdir = self.param['outdir']
+
+		self.dict = {
+			'peaktime':[],	
+			't80':[],
+			'ncount':[],
+			'ncount_err':[],			
+			'detid':[],	
+			'lc':[],
+			'spec':[],
+			'cumlc':[],
+			'lcfit':[],
+			'filename':[]
+			}
+
+		if not os.path.exists(os.path.dirname(self.outdir)):
+			cmd = 'mkdir -p %s' % self.outdir
+			print(cmd);os.system(cmd)
+
+	def write(self):	
+		self.df = pd.DataFrame.from_dict(self.dict, orient='index').T		
+		self.df.to_csv(self.csvfile)
+		self.df.to_html(self.htmlfile,render_links=True, escape=False)
+
+

@@ -1,6 +1,6 @@
-datadir:  ../data/
+datadir:  /Users/enoto/Dropbox/01_enoto/research/growth/data/20211130_otsuru_sample/cogamo_data_v20211130
 outdir: out
-pipeline_name: cogamo_pipeline_211231
+pipeline_name: cogamo_pipeline_211231s
 bstcatalog_name: cogamo_bstcatalog_211231
 burst_treshold_sigma: 5.0
 # ----------
