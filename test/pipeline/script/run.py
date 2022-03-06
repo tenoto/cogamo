@@ -11,6 +11,7 @@ cat.write()
 pipe.set_catalog(cat)
 #pipe.process(1)
 #pipe.write()
+#exit()
 
 for index in range(len(pipe.df)):
 	try:

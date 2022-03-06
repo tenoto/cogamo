@@ -1099,9 +1099,12 @@ class EventData():
 			sub_outps = '%s/%s_bst%02d_sub.ps' % (self.outdir,self.basename,bst.param["burst_id"])
 			sub_outpdf = '%s/%s_bst%02d_sub.pdf' % (self.outdir,self.basename,bst.param["burst_id"])
 
+			sub_wbgd_outps = '%s/%s_bst%02d_sub_wbgd.ps' % (self.outdir,self.basename,bst.param["burst_id"])
+			sub_wbgd_outpdf = '%s/%s_bst%02d_sub_wbgd.pdf' % (self.outdir,self.basename,bst.param["burst_id"])
+
 			cmd  = 'xspec << EOF\n'
-			cmd += 'data 1 %s\n' % src_bin_outpha
-			cmd += 'resp 1 ../../cogamo/growth-bgo.rsp\n'
+			cmd += 'data 1:1 %s\n' % src_bin_outpha
+			cmd += 'resp 1:1 ../../cogamo/growth-bgo.rsp\n'
 			cmd += 'back 1 %s\n' % bgd_outpha
 			cmd += 'setp rebin 0 1\n'
 			cmd += 'setplot energy mev\n'
@@ -1117,6 +1120,22 @@ class EventData():
 			cmd += 'r x 0.2 40.0\n'
 			cmd += 'hard %s/cps\n' % sub_outps			
 			cmd += 'exit\n'
+			cmd += 'data 2:2 %s\n' % bgd_outpha
+			cmd += 'resp 2:2 ../../cogamo/growth-bgo.rsp\n'
+			cmd += 'setp rebin 10 30 2\n'
+			cmd += 'ignore 2:**-0.2\n'
+			cmd += 'iplot ld\n'
+#			cmd += 'line on 2\n'
+			cmd += 'lwid 5\n'
+			cmd += 'lwid 5\n'
+			cmd += 'lwid 5 on 1..100\n'			
+			cmd += 'time off\n'
+			cmd += 'la t %s Bst-ID %s (w/ bgd)\n' % (self.basename,bst.param["burst_id"])
+			cmd += 'la y Counts sec\\u-1\\d MeV\\u-1\\d\n'
+			cmd += 'lab rotate\n'
+			cmd += 'r x 0.2 40.0\n'
+			cmd += 'hard %s/cps\n' % sub_wbgd_outps			
+			cmd += 'exit\n'
 			cmd += 'exit\n'			
 			cmd += 'EOF\n'
 			print(cmd)
@@ -1126,11 +1145,17 @@ class EventData():
 			f.close()
 
 			os.system(cmd)
+
 			os.system('ps2pdf %s' % sub_outps)
 			os.system('mv %s %s' % (os.path.basename(sub_outpdf),self.outdir))
 			bst.subspec_pdf = sub_outpdf
 
+			os.system('ps2pdf %s' % sub_wbgd_outps)
+			os.system('mv %s %s' % (os.path.basename(sub_wbgd_outpdf),self.outdir))
+			bst.subspec_wbgd_pdf = sub_wbgd_outpdf
+
 			self.pdflist.append(sub_outpdf)	
+			self.pdflist.append(sub_wbgd_outpdf)				
 
 			bst.set_parameters()
 			bst.write_to_yamlfile()
@@ -1243,19 +1268,20 @@ class Burst():
 		yamlfile = '%s/%s_bst%02d.yaml' % (self.eventdata.outdir,self.eventdata.basename,self.param["burst_id"])
 		with open(yamlfile, "w") as wf:
 		    yaml.dump(self.param, wf,default_flow_style=False)		
-
 	def add_to_catalog(self):
-		self.catalog.dict['peaktime'].append(self.param["jsttime_peak"])
-		self.catalog.dict['t80'].append(self.param["t80"])
-		self.catalog.dict['ncount'].append(self.param["lcfit_param"]["ncount"])	
-		self.catalog.dict['ncount_err'].append(self.param["lcfit_param"]["ncount_err"])
-		self.catalog.dict['detid'].append(self.param["detid_str"])
-		self.catalog.dict['filename'].append(self.param["filename"])
-		self.catalog.dict['lc'].append('<a href="../%s">pdf</a>' % self.eventdata.multilc_pdf)	
-		self.catalog.dict['spec'].append('<a href="../%s">pdf</a>' % self.subspec_pdf)	
-		self.catalog.dict['cumlc'].append('<a href="../%s">pdf</a>' % self.cumlc_outpdf)	
-		self.catalog.dict['lcfit'].append('<a href="../%s">pdf</a>' % self.lcfit_outpdf)
-		self.catalog.write()
+		if self.catalog is not None:		
+			self.catalog.dict['peaktime'].append(self.param["jsttime_peak"])
+			self.catalog.dict['t80'].append(self.param["t80"])
+			self.catalog.dict['ncount'].append(self.param["lcfit_param"]["ncount"])	
+			self.catalog.dict['ncount_err'].append(self.param["lcfit_param"]["ncount_err"])
+			self.catalog.dict['detid'].append(self.param["detid_str"])
+			self.catalog.dict['filename'].append(self.param["filename"])
+			self.catalog.dict['lc'].append('<a href="../%s">pdf</a>' % self.eventdata.multilc_pdf)	
+			self.catalog.dict['spec'].append('<a href="../%s">pdf</a>' % self.subspec_pdf)	
+			self.catalog.dict['spec_wbgd'].append('<a href="../%s">pdf</a>' % self.subspec_wbgd_pdf)				
+			self.catalog.dict['cumlc'].append('<a href="../%s">pdf</a>' % self.cumlc_outpdf)	
+			self.catalog.dict['lcfit'].append('<a href="../%s">pdf</a>' % self.lcfit_outpdf)
+			self.catalog.write()
 
 class Pipeline(object):
 	def __init__(self,parameter_yamlfile):
@@ -1409,6 +1435,7 @@ class Catalog(object):
 			'detid':[],	
 			'lc':[],
 			'spec':[],
+			'spec_wbgd':[],
 			'cumlc':[],
 			'lcfit':[],
 			'filename':[]
