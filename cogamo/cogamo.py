@@ -19,6 +19,7 @@ tz_utc = timezone(timedelta(hours=0), 'UTC')
 
 import matplotlib.pylab as plt 
 import matplotlib.gridspec as gridspec
+import matplotlib.dates as dates
 
 from iminuit import Minuit
 from probfit import Chi2Regression
@@ -1120,10 +1121,46 @@ class EventData():
 			cmd += 'r x 0.2 40.0\n'
 			cmd += 'hard %s/cps\n' % sub_outps			
 			cmd += 'exit\n'
+#			cmd += 'data 2:2 %s\n' % bgd_outpha
+#			cmd += 'resp 2:2 ../../cogamo/growth-bgo.rsp\n'
+#			cmd += 'setp rebin 10 30 2\n'
+#			cmd += 'ignore 2:**-0.2\n'
+#			cmd += 'iplot ld\n'
+##			cmd += 'line on 2\n'
+#			cmd += 'lwid 5\n'
+#			cmd += 'lwid 5\n'
+#			cmd += 'lwid 5 on 1..100\n'			
+#			cmd += 'time off\n'
+#			cmd += 'la t %s Bst-ID %s (w/ bgd)\n' % (self.basename,bst.param["burst_id"])
+#			cmd += 'la y Counts sec\\u-1\\d MeV\\u-1\\d\n'
+#			cmd += 'lab rotate\n'
+#			cmd += 'r x 0.2 40.0\n'
+#			cmd += 'hard %s/cps\n' % sub_wbgd_outps			
+#			cmd += 'exit\n'
+			cmd += 'exit\n'			
+			cmd += 'EOF\n'
+			print(cmd)
+			fcmd = '%s/%s_bst%02d_sub.xcm' % (self.outdir,self.basename,bst.param["burst_id"])
+			f = open(fcmd,'w')
+			f.write(cmd)
+			f.close()
+
+			os.system(cmd)
+
+			os.system('ps2pdf %s' % sub_outps)
+			os.system('mv %s %s' % (os.path.basename(sub_outpdf),self.outdir))
+			bst.subspec_pdf = sub_outpdf
+
+			cmd  = 'xspec << EOF\n'
+			cmd += 'data 1:1 %s\n' % src_bin_outpha
+			cmd += 'resp 1:1 ../../cogamo/growth-bgo.rsp\n'
+			cmd += 'back 1 %s\n' % bgd_outpha
 			cmd += 'data 2:2 %s\n' % bgd_outpha
-			cmd += 'resp 2:2 ../../cogamo/growth-bgo.rsp\n'
-			cmd += 'setp rebin 10 30 2\n'
-			cmd += 'ignore 2:**-0.2\n'
+			cmd += 'resp 2:2 ../../cogamo/growth-bgo.rsp\n'		
+			cmd += 'setp rebin 10 30 1\n'
+			cmd += 'setp rebin 0 1 1\n'
+			cmd += 'setplot energy mev\n'
+			cmd += 'ignore 1-2:**-0.2\n'
 			cmd += 'iplot ld\n'
 #			cmd += 'line on 2\n'
 			cmd += 'lwid 5\n'
@@ -1139,16 +1176,12 @@ class EventData():
 			cmd += 'exit\n'			
 			cmd += 'EOF\n'
 			print(cmd)
-			fcmd = '%s/%s_bst%02d_sub.xcm' % (self.outdir,self.basename,bst.param["burst_id"])
+			fcmd = '%s/%s_bst%02d_sub_wbgd.xcm' % (self.outdir,self.basename,bst.param["burst_id"])
 			f = open(fcmd,'w')
 			f.write(cmd)
 			f.close()
 
 			os.system(cmd)
-
-			os.system('ps2pdf %s' % sub_outps)
-			os.system('mv %s %s' % (os.path.basename(sub_outpdf),self.outdir))
-			bst.subspec_pdf = sub_outpdf
 
 			os.system('ps2pdf %s' % sub_wbgd_outps)
 			os.system('mv %s %s' % (os.path.basename(sub_wbgd_outpdf),self.outdir))
@@ -1450,4 +1483,124 @@ class Catalog(object):
 		self.df.to_csv(self.csvfile)
 		self.df.to_html(self.htmlfile,render_links=True, escape=False)
 
+class HKData():
+	"""
+	1. yyyy-mm-dd (JST)
+	2. HH:MM:SS (JST)
+	3. data recording interval (min)
+	4. rate1 (cps) below "AREABD1" of " config.csv"
+	5. rate2 (cps) between "AREABD1" and  "AREABD2" of " config.csv"
+	6. rate3 (cps) between "AREABD2" and  "AREABD3" of " config.csv"
+	7. rate4 (cps) between "AREABD3" and  "AREABD4" of " config.csv"
+	8. rate5 (cps) between "AREABD4" and  "AREABD5" of " config.csv"
+	9. rate6 (cps) above "AREABD5" of " config.csv"
+	10. temperature (degC)
+	11. pressure (hPa)
+	12. humidity (%)
+	13. the maximum value among the difference of 10-sec moving average of count rates to the latest count rates (10秒移動平均とCPS値との差の最大値:定義を確認する必要がある) 
+	14. optical illumination (lux)
+	15. gps status (0:invalid, 1 or 2: valid)
+	16. longitude (deg)
+	17. latitude (deg)
+	"""
+	def __init__(self, filepath):	
+		self.filetype = None		
+		self.filepath = filepath
+		self.filename = os.path.basename(self.filepath)
+		self.basename = os.path.splitext(self.filename)[0]
 
+		self.param = {}
+		self.pdflist = []
+
+		self.set_filetype()
+		self.open_file()
+		self.set_time_series()
+
+	def set_filetype(self):
+		if re.fullmatch(r'\d{3}_\d{8}.csv', self.filename):
+			self.filetype = 'rawcsv'
+			self.detid_str, self.yyyymmdd_jst = self.basename.split("_")		
+			self.year = self.yyyymmdd_jst[0:4]
+			self.month = self.yyyymmdd_jst[4:6]
+			self.day = self.yyyymmdd_jst[6:8]			
+		else:
+			sys.stdout.write("[error] filetype error...")
+			return -1
+
+	def open_file(self):
+		if not os.path.exists(self.filepath):
+			raise FileNotFoundError("{} not found".format(self.filepath))
+		try:
+			if self.filetype == 'rawcsv':
+				self.df = pd.read_csv(self.filepath, index_col=False, 
+					names=['yyyymmdd','hhmmss','interval','rate1','rate2','rate3','rate4','rate5','rate6','temperature','pressure','humidity','differential','lux','gps_status','longitude','latitude'],
+					dtype={})
+				self.nevents = len(self.df)
+			else:
+				sys.stdout.write("[error] filetype error...")
+				return -1
+		except OSError as e:
+			raise
+
+		sys.stdout.write('[HKData] open {}\n'.format(self.filepath))	
+
+	def set_time_series(self):		
+
+		sys.stdout.write('----- {} -----\n'.format(sys._getframe().f_code.co_name))
+
+		time_series_str = np.char.array(self.df['yyyymmdd'] + 'T' + self.df['hhmmss'])
+		time_series_jst = Time(time_series_str, format='isot', scale='utc', precision=5) 	
+		time_series_utc = time_series_jst - timedelta(hours=+9)		
+		self.df['unixtime'] = time_series_utc.to_value('unix',subfmt='decimal')
+		self.df['unixtime'] = self.df['unixtime'].astype(np.float64)
+
+	def plot(self,outpdf):
+		sys.stdout.write('----- {} -----\n'.format(sys._getframe().f_code.co_name))		
+		time_series_utc = Time(self.df['unixtime'],format='unix',scale='utc')
+		time_series_jst = time_series_utc.to_datetime(timezone=tz_tokyo)
+		#matplotlib.rcParams['timezone'] = 'Asia/Tokyo'
+		plt.rcParams['timezone'] = 'Asia/Tokyo'
+
+		fig, axs = plt.subplots(9,1, figsize=(8.27,11.69), 
+			sharex=True, gridspec_kw={'hspace': 0})
+		axs[0].step(time_series_jst,self.df['rate1']+self.df['rate2'],'o-', mec='k', markersize=2,where='mid')
+		axs[0].set_ylabel(r"Rate L (cps)")
+		#axs[0].set_title(title)	
+		axs[1].step(time_series_jst,self.df['rate3']+self.df['rate4'],'o-', mec='k', markersize=2,where='mid')
+		axs[1].set_ylabel(r"Rate M (cps)")	
+		axs[2].step(time_series_jst,self.df['rate5']+self.df['rate6'],'o-', mec='k', markersize=2,where='mid')
+		axs[2].set_ylabel(r"Rate H (cps)")				
+		axs[3].step(time_series_jst,self.df['temperature'],where='mid')
+		axs[3].set_ylabel(r"Temp. (degC)")
+		axs[4].step(time_series_jst,self.df['pressure'],where='mid')
+		axs[4].set_ylabel(r"Press. (hPa)")		
+		axs[5].step(time_series_jst,self.df['humidity'],where='mid')
+		axs[5].set_ylabel(r"Humid. (%)")
+		axs[6].step(time_series_jst,self.df['differential'],where='mid')		
+		axs[6].set_ylabel(r"Diff (cps)")	
+		axs[6].set_yscale('log')		
+		axs[7].step(time_series_jst,self.df['lux'],where='mid')		
+		axs[7].set_yscale('log')
+		axs[7].set_ylabel(r"Illum. (lux)")
+		axs[8].step(time_series_jst,self.df['gps_status'],where='mid')		
+		axs[8].set_ylabel(r"GPS status")		
+		axs[8].set_xlabel(r"Time (JST)")
+		axs[8].set_ylim(-0.5,2.5)
+		axs[8].xaxis.set_major_formatter(dates.DateFormatter('%m-%d\n%H:%M'))
+		
+		axs[8].set_xlim(time_series_jst[0],time_series_jst[-1])
+		for ax in axs:
+			ax.label_outer()	
+			ax.minorticks_on()
+			ax.xaxis.grid(True)
+			ax.xaxis.grid(which='major', linestyle='--', color='#000000')
+			ax.xaxis.grid(which='minor', linestyle='-.')	
+			ax.xaxis.set_minor_locator(dates.HourLocator())
+			ax.tick_params(axis="both", which='major', direction='in', length=5)
+			ax.tick_params(axis="both", which='minor', direction='in', length=3)			
+
+		fig.align_ylabels(axs)
+		plt.tight_layout(pad=2)
+		plt.rcParams["font.family"] = "serif"
+		plt.rcParams["mathtext.fontset"] = "dejavuserif"		
+		plt.savefig(outpdf)		
