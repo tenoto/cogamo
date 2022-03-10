@@ -183,6 +183,9 @@ def extract_xspec_pha(energy_keV_array,outpha,exposure):
 	hdu[i].header["DETCHANS"] = number_of_channel
 	#hdu[i].header.comments[keyword] = "total number of detector channels"
 
+	if os.path.exists(outpha):
+		cmd = 'rm -f %s' % outpha
+		print(cmd);os.system(cmd)
 	hdu.writeto(outpha)  
 
 def run(param_yamlfile):
@@ -508,6 +511,14 @@ class PhaSpectrum(Hist1D):
 			flag_yerr=True,
 			flag_xlog=False,flag_ylog=True,
 			xlim=xlim)
+
+#class XspecPhaFile():
+#	def __init__(self,filepath):
+#		self.filepath = filepath
+#
+#	def fill_events(self,energy_keV_array,exposure):
+
+
 
 class EnergySpectrum(Hist1D):
 	def __init__(self, energy_series, nbins, energy_min, energy_max):
@@ -888,22 +899,29 @@ class EventData():
 		lc.write(outpdf=outpdf,title=title,mask=mask)	
 		self.pdflist.append(outpdf)					
 
-		gti_start_index = np.argwhere(mask[:-1] < mask[1:])[0] # [False,True] transition
-		gti_stop_index = np.argwhere(mask[:-1] > mask[1:])[0] # [False,True] transition
+		if sum(mask) == 0:
+			self.bst_gti_start = None
+			self.bst_gti_stop = None
+			self.numof_bst = 0
+			self.bst_list = None
+		else:
+			gti_start_index = np.argwhere(mask[:-1] < mask[1:])[0] # [False,True] transition
+			gti_stop_index = np.argwhere(mask[:-1] > mask[1:])[0] # [False,True] transition
 
-		self.bst_gti_start = np.array([lc.x[gti_start_index]-lc.tbin*0.5])
-		self.bst_gti_stop = np.array([lc.x[gti_stop_index]+lc.tbin*0.5])
-		self.numof_bst = len(self.bst_gti_start)
-		self.bst_list = []
+			self.bst_gti_start = np.array([lc.x[gti_start_index]-lc.tbin*0.5])
+			self.bst_gti_stop = np.array([lc.x[gti_stop_index]+lc.tbin*0.5])
+			self.numof_bst = len(self.bst_gti_start)
+			self.bst_list = []
 
-		for i in range(self.numof_bst):
-			print(i+1,self.bst_gti_start[i],self.bst_gti_stop[i])
-			self.bst_list.append(
-				Burst(self,i+1,	self.bst_gti_start[i],self.bst_gti_stop[i],catalog=catalog))
+			for i in range(self.numof_bst):
+				print(i+1,self.bst_gti_start[i],self.bst_gti_stop[i])
+				self.bst_list.append(
+					Burst(self,i+1,	self.bst_gti_start[i],self.bst_gti_stop[i],catalog=catalog))
 
 	def plot_multi_curves(self,
 			tbin=8.0,tstart=0.0,tstop=3600.0,xlim=[0.0,3600.0],
 			ebands=[[None,1.0],[1.0,3.0],[3.0,10.0],[10.0,None]]):
+		sys.stdout.write('----- {} -----\n'.format(sys._getframe().f_code.co_name))	
 
 		lc_list = []
 		for i in range(len(ebands)):
@@ -952,8 +970,16 @@ class EventData():
 
 		return outpdf
 
+	def extract_xspec_pha(self):
+		sys.stdout.write('----- {} -----\n'.format(sys._getframe().f_code.co_name))
+		extract_xspec_pha(
+			energy_keV_array=np.array(self.df['energy_mev'])*1000.0,
+			outpha='test.pha',
+			exposure=3600.0)
+
 	def analysis_bursts(self,energy_min=3.0,energy_max=10.0,
 		tbin=8.0,time_offset=150.0,fit_nsigma=3,tbin_cumlc=1.0):
+		sys.stdout.write('----- {} -----\n'.format(sys._getframe().f_code.co_name))
 
 		mask, message, suffix = self.get_energy_mask(
 			energy_min=energy_min,energy_max=energy_max)
@@ -1558,37 +1584,67 @@ class HKData():
 		sys.stdout.write('----- {} -----\n'.format(sys._getframe().f_code.co_name))		
 		time_series_utc = Time(self.df['unixtime'],format='unix',scale='utc')
 		time_series_jst = time_series_utc.to_datetime(timezone=tz_tokyo)
-		#matplotlib.rcParams['timezone'] = 'Asia/Tokyo'
 		plt.rcParams['timezone'] = 'Asia/Tokyo'
 
-		fig, axs = plt.subplots(9,1, figsize=(8.27,11.69), 
+		title  = 'DET_ID=%s ' % self.detid_str
+		title += '(Longitude=%.3f deg, ' % (np.mean(self.df['longitude']))
+		title += 'Latitude=%.3f deg)' % (np.mean(self.df['latitude']))		
+		title += '\n'
+		title += '%s ' % str(time_series_jst[0])[0:10]
+		title += 'Interval=%d min ' % (self.df['interval'][0])
+		title += '(%s)' % self.filename
+		title += '\n'		
+		#if self.hdu['HK'].header['AREABD2'] > 0.0:
+		#	title += 'Rate L (1+2):<%.1f MeV, ' % (self.hdu['HK'].header['AREABD2']/1000.0)
+		#	title += 'Rate M (3+4):%.1f-%.1f MeV, ' % (self.hdu['HK'].header['AREABD2']/1000.0,self.hdu['HK'].header['AREABD4']/1000.0)		
+		#	title += 'Rate H (5+6):>%.1f MeV, ' % (self.hdu['HK'].header['AREABD4']/1000.0)
+		title += 'Rate L (1+2):<1 MeV, ' 
+		title += 'Rate M (3+4):1-3 MeV, '
+		title += 'Rate H (5+6):>3 MeV '
+
+		# color https://matplotlib.org/stable/tutorials/colors/colors.html
+		fig, axs = plt.subplots(8,1, figsize=(8.27,11.69), 
 			sharex=True, gridspec_kw={'hspace': 0})
-		axs[0].step(time_series_jst,self.df['rate1']+self.df['rate2'],'o-', mec='k', markersize=2,where='mid')
+		axs[0].step(
+			time_series_jst,
+			self.df['rate1']+self.df['rate2'],
+			'-', c='salmon',mec='k', markersize=2,where='mid')
 		axs[0].set_ylabel(r"Rate L (cps)")
-		#axs[0].set_title(title)	
-		axs[1].step(time_series_jst,self.df['rate3']+self.df['rate4'],'o-', mec='k', markersize=2,where='mid')
+		axs[0].set_title(title)	
+		axs[1].step(
+			time_series_jst,
+			self.df['rate3']+self.df['rate4'],
+			'-', c='tomato',mec='k', markersize=2,where='mid')
 		axs[1].set_ylabel(r"Rate M (cps)")	
-		axs[2].step(time_series_jst,self.df['rate5']+self.df['rate6'],'o-', mec='k', markersize=2,where='mid')
+		axs[2].step(
+			time_series_jst,
+			self.df['rate5']+self.df['rate6'],
+			'-',c='red',mec='k', markersize=2,where='mid')
 		axs[2].set_ylabel(r"Rate H (cps)")				
-		axs[3].step(time_series_jst,self.df['temperature'],where='mid')
+		axs[3].step(time_series_jst,self.df['temperature'],
+			'-',c='k',where='mid')
 		axs[3].set_ylabel(r"Temp. (degC)")
-		axs[4].step(time_series_jst,self.df['pressure'],where='mid')
+		axs[4].step(time_series_jst,self.df['pressure'],
+			'-',c='blue',where='mid')
 		axs[4].set_ylabel(r"Press. (hPa)")		
-		axs[5].step(time_series_jst,self.df['humidity'],where='mid')
+		axs[5].step(time_series_jst,self.df['humidity'],
+			'-',c='yellowgreen',where='mid')
 		axs[5].set_ylabel(r"Humid. (%)")
-		axs[6].step(time_series_jst,self.df['differential'],where='mid')		
-		axs[6].set_ylabel(r"Diff (cps)")	
-		axs[6].set_yscale('log')		
-		axs[7].step(time_series_jst,self.df['lux'],where='mid')		
-		axs[7].set_yscale('log')
-		axs[7].set_ylabel(r"Illum. (lux)")
-		axs[8].step(time_series_jst,self.df['gps_status'],where='mid')		
-		axs[8].set_ylabel(r"GPS status")		
-		axs[8].set_xlabel(r"Time (JST)")
-		axs[8].set_ylim(-0.5,2.5)
-		axs[8].xaxis.set_major_formatter(dates.DateFormatter('%m-%d\n%H:%M'))
+#		axs[6].step(time_series_jst,self.df['differential'],where='mid')		
+#		axs[6].set_ylabel(r"Diff (cps)")	
+#		axs[6].set_yscale('log')		
+		axs[6].step(time_series_jst,self.df['lux'],
+			'-',c='purple',where='mid')		
+		axs[6].set_yscale('log')
+		axs[6].set_ylabel(r"Illum.")
+		axs[7].step(time_series_jst,self.df['gps_status'],
+			'-',c='sienna',where='mid')		
+		axs[7].set_ylabel(r"GPS status")		
+		axs[7].set_xlabel(r"Time (JST)")
+		axs[7].set_ylim(-0.5,2.5)
+		axs[7].xaxis.set_major_formatter(dates.DateFormatter('%m-%d\n%H:%M'))
 		
-		axs[8].set_xlim(time_series_jst[0],time_series_jst[-1])
+		axs[7].set_xlim(time_series_jst[0],time_series_jst[-1])
 		for ax in axs:
 			ax.label_outer()	
 			ax.minorticks_on()
