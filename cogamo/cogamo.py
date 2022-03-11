@@ -132,7 +132,8 @@ def plot_xydata(x,y,outpdf,yerr=None,model_x=None,model_y=None,
 
 	plt.savefig(outpdf)	
 
-def extract_xspec_pha(energy_keV_array,outpha,exposure):
+def extract_xspec_pha(energy_keV_array,outpha,exposure,
+	gti=None,start_unixtime=None,stop_unixtime=None):
 	number_of_channel = 2048
 	energy_min = 40 # keV 
 	energy_step = 20 # keV 
@@ -143,22 +144,43 @@ def extract_xspec_pha(energy_keV_array,outpha,exposure):
 
 	col_channel = fits.Column(name='CHANNEL',format="J", array=np.array([i for i in range(0,number_of_channel)]))
 	col_counts = fits.Column(name='COUNTS',format="J",unit="count",	array=hist.y)
+
 	hdu1 = fits.BinTableHDU.from_columns([col_channel,col_counts])
 	hdu1.name = 'SPECTRUM'
 
-	prhdu = fits.PrimaryHDU()
-	hdu = fits.HDUList([prhdu, hdu1])
+	if gti is not None:
+		gti_start = fits.Column(name='START',format="1D",unit="s",array=np.array(gti[0]))
+		gti_stop = fits.Column(name='STOP',format="1D",unit="s",array=np.array(gti[1]))
+		hdu2 = fits.BinTableHDU.from_columns([gti_start,gti_stop])
+		hdu2.name = 'GTI'
 
-	hdu1.header['HDUCLASS'] = 'OGIP'
-	hdu1.header['HDUCLAS1'] = 'SPECTRUM'
-	hdu1.header['HDUVERS1'] = '1.2.0   '   	
-	hdu1.header['HDUVERS'] = '1.2.0   '
+	prhdu = fits.PrimaryHDU()
+	if gti is None:
+		hdulist = fits.HDUList([prhdu, hdu1])
+	else:
+		hdulist = fits.HDUList([prhdu, hdu1, hdu2])
+
+	for hdu in hdulist:
+		hdu.header['HDUCLASS'] = 'OGIP'
+		hdu.header['HDUCLAS1'] = 'SPECTRUM'
+		hdu.header['HDUVERS1'] = '1.2.0   '   	
+		hdu.header['HDUVERS'] = '1.2.0   '
+		hdu.header['TELESCOP']= 'thdr'
+		hdu.header['INSTRUME']= 'CogamoCsI'		
+		hdu.header['EXPOSURE'] = exposure 
+		if start_unixtime is not None:
+			hdu.header['TSTART'] = (start_unixtime, 'start unixtime in UTC')
+			start_time_utc = Time(start_unixtime,format='unix',scale='utc')
+			start_time_jst = start_time_utc + timedelta(hours=+9)
+			hdu.header['STARTJST'] = (start_time_jst.isot, 'Start time in JST (ISOT)')
+		if stop_unixtime is not None:
+			hdu.header['TSTOP'] = (stop_unixtime, 'stop unixtime in UTC')
+			stop_time_utc = Time(stop_unixtime,format='unix',scale='utc')
+			stop_time_jst = stop_time_utc + timedelta(hours=+9)			
+			hdu.header['STOPJST'] = (stop_time_jst.isot, 'Stop time in JST (ISOT)')
 	hdu1.header['TLMIN1']  = 0   
 	hdu1.header['TLMAX1']  = 2047
-	hdu1.header['TELESCOP']= 'thdr'
-	hdu1.header['INSTRUME']= 'CogamoCsI'
 	hdu1.header['FILTER']  = 'UNKNOWN '
-	hdu1.header['EXPOSURE'] = exposure 
 	hdu1.header['AREASCAL'] = 1.0 
 	hdu1.header['BACKFILE'] = 'NONE'
 	hdu1.header['BACKSCAL'] = 1.0
@@ -170,23 +192,12 @@ def extract_xspec_pha(energy_keV_array,outpha,exposure):
 	hdu1.header['POISSERR'] = True 
 	hdu1.header['STAT_ERR'] = 0
 	hdu1.header['SYS_ERR'] = 0	
-
-	"""
-	for i in range(0,2):
-	  	for keyword,usrsetup in setup['keywords_common'].items():
-			hdu[i].header[keyword] = usrsetup[0]
-			hdu[i].header.comments[keyword] = usrsetup[1]
-		hdu[i].header["FILENAME"] = output_rmffile
-		hdu[i].header.comments[keyword] = "Filename"				
-	"""		
-	i = 1
-	hdu[i].header["DETCHANS"] = number_of_channel
-	#hdu[i].header.comments[keyword] = "total number of detector channels"
+	hdu1.header["DETCHANS"] = number_of_channel
 
 	if os.path.exists(outpha):
 		cmd = 'rm -f %s' % outpha
 		print(cmd);os.system(cmd)
-	hdu.writeto(outpha)  
+	hdulist.writeto(outpha)  
 
 def run(param_yamlfile):
 	pipe = Pipeline(param_yamlfile)
@@ -625,6 +636,8 @@ class EventData():
 		self.param = {}
 		self.pdflist = []
 
+		self.timesys = None		
+
 		self.set_filetype()
 		self.open_file()
 
@@ -802,6 +815,7 @@ class EventData():
 		self.time_series_utc = time_series_jst - timedelta(hours=+9)
 		self.df['unixtime'] = self.time_series_utc.to_value('unix',subfmt='decimal')
 		self.df['unixtime'] = self.df['unixtime'].astype(np.float64)
+		self.timesys = 'UTC'
 
 		time_offset_str = str_time + '00:00'
 		time_offset_jst = Time(time_offset_str, format='isot', scale='utc', precision=5) 
@@ -972,10 +986,25 @@ class EventData():
 
 	def extract_xspec_pha(self):
 		sys.stdout.write('----- {} -----\n'.format(sys._getframe().f_code.co_name))
+
+		self.xspec_pha = '%s/%s_obs.pha' % (self.outdir,self.basename)
+		print('xspec_pha: %s' % self.xspec_pha)
+		gti_start_unixtime = float(self.df.head(1)['unixtime'])
+		gti_stop_unixtime = float(self.df.tail(1)['unixtime'])
+		gti_exposure = gti_stop_unixtime - gti_start_unixtime
+		print('GTI: %.6f--%.6f' % (gti_start_unixtime,gti_stop_unixtime))
+		print('Exposure: %.3f' % gti_exposure)
+		gti = [[gti_start_unixtime],[gti_stop_unixtime]]
+
 		extract_xspec_pha(
-			energy_keV_array=np.array(self.df['energy_mev'])*1000.0,
-			outpha='test.pha',
-			exposure=3600.0)
+			energy_keV_array=np.array(
+			self.df['energy_mev'])*1000.0, # convert to keV
+			outpha=self.xspec_pha,
+			exposure=gti_exposure,
+			gti=gti,
+			start_unixtime=gti_start_unixtime,
+			stop_unixtime=gti_stop_unixtime
+			)
 
 	def analysis_bursts(self,energy_min=3.0,energy_max=10.0,
 		tbin=8.0,time_offset=150.0,fit_nsigma=3,tbin_cumlc=1.0):
