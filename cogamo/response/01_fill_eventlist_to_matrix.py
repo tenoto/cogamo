@@ -52,7 +52,7 @@ H = hist2d.T
 fig = plt.figure(figsize=(8,8),tight_layout=True)
 ax = fig.add_subplot(111,title='Cogamo response matrix (original)')
 ax.set_xlabel('Input energy (keV)')		
-ax.set_ylabel('Output energy (keV)')
+ax.set_ylabel('Deposited energy (keV)')
 
 img = plt.imshow(H, 
 	aspect='equal',
