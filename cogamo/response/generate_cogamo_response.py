@@ -21,7 +21,6 @@ total_number = len(df['event number'])
 #print(df)
 #print(total_number)
 
-"""
 edges_input_energy = np.concatenate([
 	np.arange(40,400,5),
 	np.arange(400,1200,10),
@@ -29,8 +28,7 @@ edges_input_energy = np.concatenate([
 	np.arange(3000,8000,40),
 	np.arange(8000,20000,100),
 	np.arange(20000,41200,200)])
-"""
-edges_input_energy = np.arange(40,41200,10000)	
+#edges_input_energy = np.arange(40,41200,10000)	
 print(edges_input_energy)
 print(len(edges_input_energy))
 
@@ -76,6 +74,16 @@ plt.step(bincentres,hist1d/binwidth,where='mid',color='b',linestyle='--')
 #	plt.tight_layout()
 
 plt.savefig('hist1d.pdf')
+
+# ===================
+fig, ax = plt.subplots(1,1, figsize=(11.69,11.69)) # A4 size, inich unit 
+fontsize = 18 
+
+print(edges_input_energy.shape)
+plt.pcolormesh(edges_input_energy, edges_deposit_energy, hist2d)
+
+plt.savefig('hist2d.pdf')
+
 
 """
 H = hist2d.T
