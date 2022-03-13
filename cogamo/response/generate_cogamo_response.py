@@ -26,10 +26,13 @@ PARAM_EDGES_INITIAL_ENERGY = [
 	[8000,20000,100],
 	[20000,41200,200]
 	] # full 
-PARAM_EDGES_DEPOSIT_ENERGY = [40,41000,20] # low-resolution 	
+PARAM_EDGES_DEPOSIT_ENERGY = [40,41000,20] # full 
 #PARAM_EDGES_INITIAL_ENERGY = [[40,41000,1000]] # low-resolution 
 #PARAM_EDGES_DEPOSIT_ENERGY = [40,41000,500] # low-resolution 
 SURFACE_AREA = 75 # cm2 (5x15)
+DEGRADATION_SLOPE = -0.50
+DEGRADATION_PIVOT = 1.00 # MeV 
+DEGRADATION_NORM = 9.22 # percent 
 RESP_FILENAME = 'cogamo_fy2020.rsp'
 # ============================
 
@@ -73,6 +76,15 @@ df['event number'] = df['event number'].astype('int')
 total_number = len(df['event number'])
 
 # -------------------
+# Energy resolution 
+fwhm = lambda x: x*(DEGRADATION_NORM/100.0)*(x/(DEGRADATION_PIVOT*1000.0))**DEGRADATION_SLOPE if (x>0.0) else 0.0
+func_fwhm = np.vectorize(fwhm)
+df["fwhm"] = func_fwhm(df["deposit energy"])
+df["sigma"] = df["fwhm"] / (2*np.sqrt(2.0*np.log(2.0)))
+df["randn"] = np.random.randn(total_number)
+df["redist energy"] = df["deposit energy"] + df["randn"] * df["sigma"]
+
+# -------------------
 # 1D-Histogram of the initial enegy 
 # also get the number of injected photons 
 # including escaped non-interacted events 
@@ -106,7 +118,8 @@ plt.savefig('%s/hist1d_init.pdf' % product_dir)
 # Z: Number of count 
 hist2d_count, _, _ = np.histogram2d(
 	df['initial energy'],
-	df['deposit energy'],
+	#df['deposit energy'],
+	df['redist energy'],
 	bins=(edges_initial_energy,edges_deposit_energy))
 print("hist2d_count.shape:",hist2d_count.shape)
 
@@ -120,11 +133,17 @@ for i in range(nbin_initial_energy):
 		hist2d_count[i]/float(hist1d_init[i]))
 hist2d_normalized_count = np.array(list_normalized_count)
 
+# -------------------
+# multiply the surface area 
+hist2d_resp = SURFACE_AREA * hist2d_normalized_count
+
+# -------------------
+# [plot] 2-dim matrix 
 fig = plt.figure(figsize=(8,8),tight_layout=True)
 ax = fig.add_subplot(111,
 	title='Cogamo response matrix (original)')
 ax.set_xlabel('Initial energy (keV)')		
-ax.set_ylabel('Deposit energy (keV)')
+ax.set_ylabel('Deposit energy with resolution (keV)')
 #ax.set_xscale('log')
 #ax.set_yscale('log')
 ax.pcolormesh(
@@ -134,9 +153,11 @@ ax.pcolormesh(
 	)
 fig.savefig('%s/hist2d_count.pdf' % product_dir)
 
+
 ax.pcolormesh(
 	edges_initial_energy,edges_deposit_energy,
 	hist2d_normalized_count.T,
+	norm=colors.LogNorm(vmin=0.001,vmax=1.0),
 	shading='flat',rasterized='True',edgecolors='none'
 	)
 fig.savefig('%s/hist2d_normalized_count.pdf' % product_dir)
@@ -161,7 +182,7 @@ hdu_ebounds = fits.ColDefs([channel_column,e_min_column,e_max_column])
 # --- prepare MATRIX (2nd Extension) --- 
 matrix_column = fits.Column(name='MATRIX',
 	format="%sE" % nbin_deposit_energy, 
-	array=hist2d_normalized_count)
+	array=hist2d_resp)
 energy_lo_column = fits.Column(name='ENERG_LO',
 	format="E",unit="keV",
 	array=edges_initial_energy[:-1])
