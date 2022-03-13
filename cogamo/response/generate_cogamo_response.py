@@ -11,6 +11,9 @@ from astropy.io import fits
 import matplotlib.pylab as plt 
 from matplotlib import colors
 
+# http://heasarc.gsfc.nasa.gov/docs/xanadu/xspec/fits/fitsfiles.html
+# http://heasarc.gsfc.nasa.gov/docs/heasarc/caldb/docs/memos/cal_gen_92_002/cal_gen_92_002.html#tth_sEc3.2
+
 # ============================
 # Set parameter 
 VERSION = '0.01'
@@ -26,6 +29,7 @@ PARAM_EDGES_INITIAL_ENERGY = [
 PARAM_EDGES_DEPOSIT_ENERGY = [40,41000,20] # low-resolution 	
 #PARAM_EDGES_INITIAL_ENERGY = [[40,41000,1000]] # low-resolution 
 #PARAM_EDGES_DEPOSIT_ENERGY = [40,41000,500] # low-resolution 
+SURFACE_AREA = 75 # cm2 (5x15)
 RESP_FILENAME = 'cogamo_fy2020.rsp'
 # ============================
 
@@ -202,7 +206,7 @@ for hdu in hdulist:
 	hdu.header['HDUDOC']  = ('OGIP memos CAL/GEN/92-002 & 92-002a','Documents describing the forma')
 	hdu.header['RMFVERSN'] = ('1992a   ','Obsolete - included for backwards compatibility')	
 
-	hdu.header['TELESCOP'] = ('ThundercloudProject','mission/satellite name, GROWTH collaboration')
+	hdu.header['TELESCOP'] = ('ThundercloudProject','mission/satellite name')
 	hdu.header['INSTRUME'] = ('CogamoFY2020','instrument/detector name')
 	hdu.header['FILTER'] = ('','filter in use')
 	hdu.header['DETNAM'] = ('CsI(Tl):50x50x150mm3','detector in use')
@@ -211,7 +215,9 @@ for hdu in hdulist:
 	hdu.header['TLMIN1'] = (channel_array[0],'Minimum value legally allowed in column 1')	
 	hdu.header['TLMAX1'] = (channel_array[-1],'Maximum value legally allowed in column 1')	
 
+	hdu.header['COMMENT'] = "-- GROWTH collaboration"
 	hdu.header['COMMENT'] = "gennerated by %s (version %s)" % (os.path.basename(__file__),VERSION)
+	hdu.header['COMMENT'] = "surface area: 5x15 cm"
 	hdu.header['COMMENT'] = "at %s" % datetime.datetime.now()
 
 # --- Write to output fitsfile --- 
