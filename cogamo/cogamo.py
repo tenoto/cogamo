@@ -30,52 +30,6 @@ MAX_PHA_CHANNEL = 2**10 - 1
 
 FIT_RETRY = 2
 
-"""
-Response
-
-  No. Type     EXTNAME      BITPIX Dimensions(columns)      PCOUNT  GCOUNT
- 
-   0  PRIMARY                 16     0                           0    1
-   1  BINTABLE MATRIX          8     8206(6) 592                 0    1
- 
-      Column Name                Format     Dims       Units     TLMIN  TLMAX
-      1 ENERG_LO                   1E
-      2 ENERG_HI                   1E
-      3 N_GRP                      1I
-      4 F_CHAN                     1I
-      5 N_CHAN                     1I
-      6 MATRIX                     2048E
- 
-   2  BINTABLE EBOUNDS         8     10(3) 2048                  0    1
- 
-      Column Name                Format     Dims       Units     TLMIN  TLMAX
-      1 CHANNEL                    1I
-      2 E_MIN                      1E
-      3 E_MAX                      1E
- 
-[MATRIX]
-Channel ENERG_LO ENERG_HI
-(ch)    (keV)    (keV)
-1       40       45 
-2      	45		 50
-3		50		 55
-...
-592		40800	 41000
-
-[EBOUNDS]
-Channel ENERG_LO ENERG_HI
-(ch)    (keV)    (keV)
-0       40       60
-1      	60		 80
-2		80		 100
-...
-2046	40960	 40980
-2047	40980	 41000
-
-ENERG_LO = 40 keV + 20 keV * i 
-ENERG_HI = 60 keV + 20 keV * i 
-"""
-
 #DICT_INITPAR_K40 = {'name':'K40','MeV':1.46083,'peak':132,'sigma':5,'area':18025,'c0':3731,'c1':-21.0,'pha_min':100,'pha_max':164,'binning':2,'xlim':[100,164]}
 DICT_INITPAR_K40 = {'name':'K40','MeV':1.46083,'peak':132,'sigma':5,'area':18025,'c0':3731,'c1':-21.0,'pha_min':100,'pha_max':184,'binning':2,'xlim':[100,184]}
 #DICT_INITPAR_TL208 = {'name':'Tl208','MeV':2.61453,'peak':236,'sigma':7,'area':2651,'c0':798.0,'c1':-3,'pha_min':190,'pha_max':284,'binning':2,'xlim':[190,284],}
@@ -142,9 +96,41 @@ def extract_xspec_pha(energy_keV_array,outpha,exposure,
 	hist = Hist1D(nbins=number_of_channel,xlow=energy_min,xhigh=energy_max)
 	hist.fill(energy_keV_array)
 
-	col_channel = fits.Column(name='CHANNEL',format="J", array=np.array([i for i in range(0,number_of_channel)]))
-	col_counts = fits.Column(name='COUNTS',format="J",unit="count",	array=hist.y)
+	f = open('tmp_count.txt','w')
+	for i in hist.y:
+		f.write("%d\n" % i)
+	f.close()
 
+	cmd  = 'ascii2pha infile=tmp_count.txt '
+	cmd += 'outfile=%s ' % outpha
+	cmd += 'chanpres=no dtype=1 qerror=no rows=- fchan=0 tlmin=0 pois=no filter=NONE '
+	cmd += 'detchans=%d ' % number_of_channel
+	cmd += 'telescope=thdr '
+	cmd += 'instrume=cogamo2020 '
+	cmd += 'detnam=csi5x5x15 '
+	cmd += 'chantype=PI '
+	cmd += 'exposure=%.2f'  % exposure
+	print(cmd);os.system(cmd)
+
+	cmd = 'rm -f tmp_count.txt'
+
+"""
+def extract_xspec_pha(energy_keV_array,outpha,exposure,
+	gti=None,start_unixtime=None,stop_unixtime=None):
+	number_of_channel = 2048
+	energy_min = 40 # keV 
+	energy_step = 20 # keV 
+
+	energy_max = energy_min + energy_step * number_of_channel
+	hist = Hist1D(nbins=number_of_channel,xlow=energy_min,xhigh=energy_max)
+	hist.fill(energy_keV_array)
+
+	col_channel = fits.Column(name='CHANNEL',format="J", array=np.arange(number_of_channel))
+	col_counts = fits.Column(name='COUNTS',format="J",unit="count",	array=hist.y)
+	#col_quality = fits.Column(name='QUALITY',format="I",unit="",array=np.full(0,number_of_channel))
+	#col_grouping = fits.Column(name='GROUPING',format="I",unit="",array=np.full(1,number_of_channel))
+
+	#hdu1 = fits.BinTableHDU.from_columns([col_channel,col_counts,col_quality,col_grouping])
 	hdu1 = fits.BinTableHDU.from_columns([col_channel,col_counts])
 	hdu1.name = 'SPECTRUM'
 
@@ -163,11 +149,14 @@ def extract_xspec_pha(energy_keV_array,outpha,exposure,
 	for hdu in hdulist:
 		hdu.header['HDUCLASS'] = 'OGIP'
 		hdu.header['HDUCLAS1'] = 'SPECTRUM'
-		hdu.header['HDUVERS1'] = '1.2.0   '   	
-		hdu.header['HDUVERS'] = '1.2.0   '
-		hdu.header['TELESCOP']= 'thdr'
-		hdu.header['INSTRUME']= 'CogamoCsI'		
-		hdu.header['EXPOSURE'] = exposure 
+		hdu.header['HDUVERS1'] = '1.1.0   '   	
+		hdu.header['HDUVERS'] = '1.1.0   '
+		hdu.header['HDUCLAS2'] = ('UNKNOWN ','WARNING This is NOT an OGIP-approved value')
+		hdu.header['HDUCLAS3'] = ('COUNT   ','PHA data stored as Counts (not count/s)')		
+		hdu.header['TELESCOP']= ('ThundercloudProject','mission/satellite name')
+		hdu.header['INSTRUME']= ('CogamoFY2020','instrument/detector name')
+		hdu.header['EXPOSURE'] = (exposure,'Exposure time (sec)')
+
 		if start_unixtime is not None:
 			hdu.header['TSTART'] = (start_unixtime, 'start unixtime in UTC')
 			start_time_utc = Time(start_unixtime,format='unix',scale='utc')
@@ -178,26 +167,30 @@ def extract_xspec_pha(energy_keV_array,outpha,exposure,
 			stop_time_utc = Time(stop_unixtime,format='unix',scale='utc')
 			stop_time_jst = stop_time_utc + timedelta(hours=+9)			
 			hdu.header['STOPJST'] = (stop_time_jst.isot, 'Stop time in JST (ISOT)')
+
 	hdu1.header['TLMIN1']  = 0   
-	hdu1.header['TLMAX1']  = 2047
+	hdu1.header['TLMAX1']  = number_of_channel-1
 	hdu1.header['FILTER']  = 'UNKNOWN '
-	hdu1.header['AREASCAL'] = 1.0 
-	hdu1.header['BACKFILE'] = 'NONE'
-	hdu1.header['BACKSCAL'] = 1.0
-	hdu1.header['ANCRFILE'] = 'NONE'
-	hdu1.header['CORRFILE'] = 'NONE'
-	hdu1.header['CORRSCAL'] = 1.0
-	hdu1.header['PHAVERSN'] = '1992a'
-	hdu1.header['CHANTYPE'] = 'PI'
-	hdu1.header['POISSERR'] = True 
-	hdu1.header['STAT_ERR'] = 0
-	hdu1.header['SYS_ERR'] = 0	
-	hdu1.header["DETCHANS"] = number_of_channel
+	hdu1.header['AREASCAL'] = (1.0,'Area scaling factor')
+	hdu1.header['BACKFILE'] = ('NONE','Background FITS file')
+	hdu1.header['BACKSCAL'] = (1.0,'Background scale factor')
+	hdu1.header['RESPFILE'] = ('NONE','redistribution matrix')	
+	hdu1.header['ANCRFILE'] = ('NONE','ancillary response')
+	hdu1.header['CORRFILE'] = ('NONE','Correlation FITS file')
+	hdu1.header['CORRSCAL'] = (1.0,'Correlation scale factor')
+	hdu1.header['PHAVERSN'] = ('1992a','obsolete')
+	hdu1.header['CHANTYPE'] = ('PI','channel type (PHA, PI etc)')
+	hdu1.header['POISSERR'] = (True,'Poissonian errors to be assumed')
+	hdu1.header['STAT_ERR'] = (0,'no statistical error specified')
+	hdu1.header['SYS_ERR'] = (0,'no systematic error specified')
+	hdu1.header['GROUPING'] = (0,'no grouping of the data has been defined')
+	hdu1.header["DETCHANS"] = (number_of_channel,'total number possible channels')
 
 	if os.path.exists(outpha):
 		cmd = 'rm -f %s' % outpha
 		print(cmd);os.system(cmd)
 	hdulist.writeto(outpha)  
+"""
 
 def run(param_yamlfile):
 	pipe = Pipeline(param_yamlfile)

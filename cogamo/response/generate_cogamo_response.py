@@ -14,6 +14,52 @@ from matplotlib import colors
 # http://heasarc.gsfc.nasa.gov/docs/xanadu/xspec/fits/fitsfiles.html
 # http://heasarc.gsfc.nasa.gov/docs/heasarc/caldb/docs/memos/cal_gen_92_002/cal_gen_92_002.html#tth_sEc3.2
 
+"""
+Response
+
+  No. Type     EXTNAME      BITPIX Dimensions(columns)      PCOUNT  GCOUNT
+ 
+   0  PRIMARY                 16     0                           0    1
+   1  BINTABLE MATRIX          8     8206(6) 592                 0    1
+ 
+      Column Name                Format     Dims       Units     TLMIN  TLMAX
+      1 ENERG_LO                   1E
+      2 ENERG_HI                   1E
+      3 N_GRP                      1I
+      4 F_CHAN                     1I
+      5 N_CHAN                     1I
+      6 MATRIX                     2048E
+ 
+   2  BINTABLE EBOUNDS         8     10(3) 2048                  0    1
+ 
+      Column Name                Format     Dims       Units     TLMIN  TLMAX
+      1 CHANNEL                    1I
+      2 E_MIN                      1E
+      3 E_MAX                      1E
+ 
+[MATRIX]
+Channel ENERG_LO ENERG_HI
+(ch)    (keV)    (keV)
+1       40       45 
+2      	45		 50
+3		50		 55
+...
+592		40800	 41000
+
+[EBOUNDS]
+Channel ENERG_LO ENERG_HI
+(ch)    (keV)    (keV)
+0       40       60
+1      	60		 80
+2		80		 100
+...
+2046	40960	 40980
+2047	40980	 41000
+
+ENERG_LO = 40 keV + 20 keV * i 
+ENERG_HI = 60 keV + 20 keV * i 
+"""
+
 # ============================
 # Set parameter 
 VERSION = '0.01'
@@ -227,8 +273,8 @@ for hdu in hdulist:
 	hdu.header['HDUDOC']  = ('OGIP memos CAL/GEN/92-002 & 92-002a','Documents describing the forma')
 	hdu.header['RMFVERSN'] = ('1992a   ','Obsolete - included for backwards compatibility')	
 
-	hdu.header['TELESCOP'] = ('ThundercloudProject','mission/satellite name')
-	hdu.header['INSTRUME'] = ('CogamoFY2020','instrument/detector name')
+	hdu.header['TELESCOP'] = ('thdr','mission/satellite name')
+	hdu.header['INSTRUME'] = ('cogamo2020','instrument/detector name')
 	hdu.header['FILTER'] = ('','filter in use')
 	hdu.header['DETNAM'] = ('CsI(Tl):50x50x150mm3','detector in use')
 	hdu.header['DETCHANS'] = (detchans,'total number of detector channels')	
