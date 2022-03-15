@@ -2,6 +2,7 @@
 
 import os 
 import sys
+import yaml 
 import numpy as np
 import pandas as pd
 import datetime 
@@ -60,10 +61,28 @@ ENERG_LO = 40 keV + 20 keV * i
 ENERG_HI = 60 keV + 20 keV * i 
 """
 
+if len(sys.argv) != 2:
+	print('Error: %s param.yaml' % sys.argv[0])
+	exit()
+
+yamlfile = sys.argv[1]
+param = yaml.load(open(yamlfile),Loader=yaml.FullLoader)
+
 # ============================
 # Set parameter 
-VERSION = '0.01'
+CODE_VERSION = '0.01'
 
+PARAM_EDGES_INITIAL_ENERGY = param['PARAM_EDGES_INITIAL_ENERGY']
+PARAM_EDGES_DEPOSIT_ENERGY = param['PARAM_EDGES_DEPOSIT_ENERGY']
+SURFACE_AREA = param['SURFACE_AREA']
+DEGRADATION_SLOPE = param['DEGRADATION_SLOPE']
+DEGRADATION_PIVOT = param['DEGRADATION_PIVOT']
+DEGRADATION_NORM = param['DEGRADATION_NORM']
+RESP_FILENAME = param['RESP_FILENAME']
+EVENT_LIST_FILE = param['EVENT_LIST_FILE']
+# ============================
+
+"""
 PARAM_EDGES_INITIAL_ENERGY = [
 	[40,400,5],
 	[400,1200,10],
@@ -80,7 +99,7 @@ DEGRADATION_SLOPE = -0.50
 DEGRADATION_PIVOT = 1.00 # MeV 
 DEGRADATION_NORM = 9.22 # percent 
 RESP_FILENAME = 'cogamo_fy2020.rsp'
-# ============================
+"""
 
 product_dir = '%s_prod' % os.path.splitext(RESP_FILENAME)[0]
 cmd = 'rm -rf %s; mkdir -p %s' % (product_dir,product_dir) 
@@ -114,8 +133,8 @@ nbin_deposit_energy = len(edges_deposit_energy)-1
 # 1: event number
 # 2: initial energy of a photon (keV)
 # 3: deposit energy to the scintillator (keV)
-event_list_file = '%s/response_CsI_coated.txt' % os.getenv('COGAMO_RESPONSE_DATA_PATH')
-df = pd.read_csv(event_list_file,
+# event_list_file = '%s/response_CsI_coated.txt' % os.getenv('COGAMO_RESPONSE_DATA_PATH')
+df = pd.read_csv(EVENT_LIST_FILE,
 	names=["event number","initial energy","deposit energy"],
 	delim_whitespace=True)
 df['event number'] = df['event number'].astype('int')
@@ -283,7 +302,7 @@ for hdu in hdulist:
 	hdu.header['TLMAX1'] = (channel_array[-1],'Maximum value legally allowed in column 1')	
 
 	hdu.header['COMMENT'] = "-- GROWTH collaboration"
-	hdu.header['COMMENT'] = "gennerated by %s (version %s)" % (os.path.basename(__file__),VERSION)
+	hdu.header['COMMENT'] = "gennerated by %s (code version %s)" % (os.path.basename(__file__),CODE_VERSION)
 	hdu.header['COMMENT'] = "surface area: 5x15 cm"
 	hdu.header['COMMENT'] = "at %s" % datetime.datetime.now()
 
