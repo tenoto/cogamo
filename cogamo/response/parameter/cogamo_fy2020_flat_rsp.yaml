@@ -1,0 +1,8 @@
+EVENT_LIST_FILE: '/Users/enoto/Dropbox/01_enoto/research/growth/logbook/220310_Cogamo_response/data/gabriel/flat_irrad/Response_function_data/CsI_ext_source_coated.txt'
+RESP_FILENAME: 'cogamo_fy2020_flat.rsp'
+PARAM_EDGES_INITIAL_ENERGY: [[40,400,5],[400,1200,10],[1200,3000,20],[3000,8000,40],[8000,20000,100],[20000,41200,200]]
+PARAM_EDGES_DEPOSIT_ENERGY: [40,41000,20] 
+SURFACE_AREA: 75 # cm2 (5x15)
+DEGRADATION_SLOPE: -0.50
+DEGRADATION_PIVOT: 1.00 # MeV 
+DEGRADATION_NORM: 9.22 # percent 
