@@ -37,6 +37,8 @@ DICT_INITPAR_K40 = {'name':'K40','MeV':1.46083,'peak':132,'sigma':5,'area':18025
 DICT_INITPAR_TL208 = {'name':'Tl208','MeV':2.61453,'peak':220,'sigma':7,'area':2651,'c0':798.0,'c1':-3,'pha_min':190,'pha_max':284,'binning':2,'xlim':[190,284],}
 GAMMA_LINES = [DICT_INITPAR_K40,DICT_INITPAR_TL208]
 
+RESPFILE = '%s/cogamo/response/cogamo_fy2020_flat.rsp' % os.getenv('COGAMO_PATH')
+
 def model_gauss(x, peak, sigma, area):
     return area * np.exp(-0.5*(x-peak)**2/sigma**2)/(np.sqrt(2*np.pi)*sigma) 
 
@@ -113,6 +115,7 @@ def extract_xspec_pha(energy_keV_array,outpha,exposure,
 	print(cmd);os.system(cmd)
 
 	cmd = 'rm -f tmp_count.txt'
+	print(cmd);os.system(cmd)
 
 """
 def extract_xspec_pha(energy_keV_array,outpha,exposure,
@@ -271,20 +274,20 @@ class Hist1D(object):
 		ax.tick_params(axis="both", which='minor', direction='in', length=3)
 
 		if axvline_values is not None:
-			if axvline_legends is None:
-				for value in axvline_values:
-					ax.axvline(value,ls='--')				
-			else:
+			if axvline_legends is not None:
 				for i in range(len(axvline_values)):
 					ax.axvline(axvline_values[i],ls='--',label=axvline_legends[i])
+			else:				
+				for value in axvline_values:
+					ax.axvline(value,ls='--')				
 
 		if axhline_values is not None:
-			if axhline_legends is None:
-				for value in axhline_values:
-					ax.axhline(value,ls='--')				
-			else:
+			if axhline_legends is not None:
 				for i in range(len(axhline_values)):
-					ax.axhline(axhline_values[i],ls='--',label=axhline_legends[i])
+					ax.axhline(axhline_values[i],ls='-.',label=axhline_legends[i])
+			else:				
+				for value in axhline_values:
+					ax.axhline(value,ls='-.')				
 
 		legend = ax.legend(title=legend_title,loc=legend_loc,fontsize=legend_fontsize)
 
@@ -568,8 +571,8 @@ class LightCurve(Hist1D):
 			flag_yerr=True,
 			flag_xlog=False,flag_ylog=False,
 			xlim=xlim,
-			axvline_values=axvline_values,axvline_legends=axvline_values,
-			axhline_values=axhline_values,axhline_legends=axhline_values,	
+			axvline_values=axvline_values,axvline_legends=axvline_legends,
+			axhline_values=axhline_values,axhline_legends=axhline_legends,	
 			legend_title=legend_title,legend_loc=legend_loc,legend_fontsize=legend_fontsize,
 			mask=mask)
 
@@ -755,7 +758,7 @@ class EventData():
 			flag_hist=flag_hist,
 			xlabel='Channel',ylabel='Counts/bin',title=self.basename,			
 			axvline_values=[fit_range_min,fit_range_max],
-			axvline_legends=[r"-%d\sigma" % fit_nsigma,r"+%d\sigma" % fit_nsigma],
+			axvline_legends=[r"-%d$\sigma$" % fit_nsigma,r"+%d$\sigma$" % fit_nsigma],
 			legend_text=legend_text,legend_loc='upper right',
 			xlim=[par['peak']-1.2*fit_nsigma*par['sigma'],par['peak']+1.2*fit_nsigma*par['sigma']])
 
@@ -1048,7 +1051,7 @@ class EventData():
 			legend_text += 'sigma=%.1f+/-%.1f\n' % (par['sigma'],par['sigma_err'])		
 			legend_text += 'area=%.1f+/-%.1f\n' % (par['area'],par['area_err'])
 			legend_text += 'c0=%.1f+/-%.1f\n' % (par['c0'],par['c0_err'])		
-			legend_text += 'c1=%.1f+/-%.1f\n' % (par['c1'],par['c1_err'])			
+			legend_text += 'c1=%.1f+/-%.1f\n' % (par['c1'],par['c1_err'])		
 
 			fit_range_min = par['peak'] - fit_nsigma * par['sigma']
 			fit_range_max = par['peak'] + fit_nsigma * par['sigma']	
@@ -1060,7 +1063,7 @@ class EventData():
 				ylabel='Counts / (%d sec)' % lc.tbin,				
 				title=self.basename,			
 				axvline_values=[fit_range_min,fit_range_max],
-				axvline_legends=[r"$-%d\sigma$" % fit_nsigma,r"$+%d\sigma$" % fit_nsigma],
+				axvline_legends=[r"-%d$\sigma$" % fit_nsigma,r"+%d$\sigma$" % fit_nsigma],
 				legend_text=legend_text,legend_loc='upper right',
 				xlim=[tstart,tstop]
 				)
@@ -1086,10 +1089,10 @@ class EventData():
 			bst.cumlc_outpdf = '%s/%s_bst%02d_cumlc_%s.pdf' % (self.outdir,self.basename,bst.param["burst_id"],suffix)
 			cumlc.write(outpdf=bst.cumlc_outpdf,title=title,xlim=[tstart,tstop],ylabel='Cumulative (%d sec)' % tbin_cumlc,
 				axvline_values=[at10percent,at90percent],
-				#axvline_legends=["10 percent","90 percent"],
+				axvline_legends=["10 percent at %.1f sec" % at10percent,"90 percent at %.1f sec" % at90percent],
 				axhline_values=[0.1*cumlc.y[-1],0.9*cumlc.y[-1],cumlc.y[-1]],
-				#axhline_legends=["10%","90%","100%"],
-				legend_loc='upper left'
+				axhline_legends=["10 percent at %.1f cps" % (0.1*cumlc.y[-1]),"90 percent at %.1f cps" % (0.9*cumlc.y[-1]),"100 percent at %.1f cps" % cumlc.y[-1]],
+				legend_loc='lower right'
 				)	
 			self.pdflist.append(bst.cumlc_outpdf)	
 
@@ -1102,12 +1105,20 @@ class EventData():
 				exposure=float(bst.param['t80']),
 				outpha=src_outpha)
 
-			if float(bst.param["lcfit_param"]['peak']) < 1500.0:
-				bgd_tstart = 200
-				bgd_tstop = 800			
+			bgd_tstart_offset = 100
+			bgd_duration = 600
+			if float(bst.param["at90percent"]) + bgd_tstart_offset + bgd_duration < 3600.0:
+				bgd_tstart = bgd_tstart_offset
+				bgd_tstop = bgd_tstart_offset + bgd_duration			
 			else:
-				bgd_tstart = -800
-				bgd_tstop = -200			
+				bgd_tstart = -(bgd_tstart_offset + bgd_duration)
+				bgd_tstop = -bgd_tstart_offset				
+			#if float(bst.param["lcfit_param"]['peak']) < 1500.0:
+			#	bgd_tstart = 200
+			#	bgd_tstop = 800			
+			#else:
+			#	bgd_tstart = -800
+			#	bgd_tstop = -200			
 			mask_bgd_time = np.logical_and(
 				self.df['unixtime'] >= float(self.unixtime_offset) + float(bst.param["at90percent"] + bgd_tstart ),
 				self.df['unixtime'] < float(self.unixtime_offset) + float(bst.param["at90percent"] + bgd_tstop))
@@ -1153,7 +1164,7 @@ class EventData():
 
 			cmd  = 'xspec << EOF\n'
 			cmd += 'data 1:1 %s\n' % src_bin_outpha
-			cmd += 'resp 1:1 ../../cogamo/growth-bgo.rsp\n'
+			cmd += 'resp 1:1 %s\n' % RESPFILE
 			cmd += 'back 1 %s\n' % bgd_outpha
 			cmd += 'setp rebin 0 1\n'
 			cmd += 'setplot energy mev\n'
@@ -1201,10 +1212,10 @@ class EventData():
 
 			cmd  = 'xspec << EOF\n'
 			cmd += 'data 1:1 %s\n' % src_bin_outpha
-			cmd += 'resp 1:1 ../../cogamo/growth-bgo.rsp\n'
+			cmd += 'resp 1:1 %s\n' % RESPFILE
 			cmd += 'back 1 %s\n' % bgd_outpha
 			cmd += 'data 2:2 %s\n' % bgd_outpha
-			cmd += 'resp 2:2 ../../cogamo/growth-bgo.rsp\n'		
+			cmd += 'resp 2:2 %s\n' % RESPFILE		
 			cmd += 'setp rebin 10 30 1\n'
 			cmd += 'setp rebin 0 1 1\n'
 			cmd += 'setplot energy mev\n'
