@@ -20,6 +20,7 @@ tz_utc = timezone(timedelta(hours=0), 'UTC')
 import matplotlib.pylab as plt 
 import matplotlib.gridspec as gridspec
 import matplotlib.dates as dates
+from matplotlib.ticker import MaxNLocator
 
 from iminuit import Minuit
 from probfit import Chi2Regression
@@ -38,6 +39,9 @@ DICT_INITPAR_TL208 = {'name':'Tl208','MeV':2.61453,'peak':220,'sigma':7,'area':2
 GAMMA_LINES = [DICT_INITPAR_K40,DICT_INITPAR_TL208]
 
 RESPFILE = '%s/cogamo/response/cogamo_fy2020_flat.rsp' % os.getenv('COGAMO_PATH')
+
+plt.rcParams['xtick.major.pad']='8'
+plt.rcParams['ytick.major.pad']='8'
 
 def model_gauss(x, peak, sigma, area):
     return area * np.exp(-0.5*(x-peak)**2/sigma**2)/(np.sqrt(2*np.pi)*sigma) 
@@ -519,14 +523,6 @@ class PhaSpectrum(Hist1D):
 			flag_xlog=False,flag_ylog=True,
 			xlim=xlim)
 
-#class XspecPhaFile():
-#	def __init__(self,filepath):
-#		self.filepath = filepath
-#
-#	def fill_events(self,energy_keV_array,exposure):
-
-
-
 class EnergySpectrum(Hist1D):
 	def __init__(self, energy_series, nbins, energy_min, energy_max):
 		self.energy_min = energy_min
@@ -555,6 +551,9 @@ class LightCurve(Hist1D):
 		nbins = round((self.tstop - self.tstart)/self.tbin)
 		super().__init__(nbins, self.tstart, self.tstop)
 		self.fill(self.unixtime_series-self.unixtime_offset)
+
+		self.rate = self.y / self.tbin 
+		self.rate_err = self.yerr / self.tbin 
 
 		self.time_offset_str = datetime.fromtimestamp(self.unixtime_offset)
 
@@ -969,7 +968,7 @@ class EventData():
 			ax.xaxis.grid(which='minor', linestyle='-.')	
 			ax.tick_params(axis="both", which='major', direction='in', length=5)
 			ax.tick_params(axis="both", which='minor', direction='in', length=3)	
-
+		
 		fig.align_ylabels(axs)
 		plt.tight_layout(pad=2)
 		plt.rcParams["font.family"] = "serif"
@@ -1003,7 +1002,8 @@ class EventData():
 			)
 
 	def analysis_bursts(self,energy_min=3.0,energy_max=10.0,
-		tbin=8.0,time_offset=150.0,fit_nsigma=3,tbin_cumlc=1.0):
+		tbin=8.0,time_offset=150.0,fit_nsigma=3,tbin_cumlc=1.0,
+		bgd_type="both",bgd_tgap=50,bgd_duration=350):
 		sys.stdout.write('----- {} -----\n'.format(sys._getframe().f_code.co_name))
 
 		mask, message, suffix = self.get_energy_mask(
@@ -1012,6 +1012,7 @@ class EventData():
 		for bst in self.bst_list:
 			print("bst-%d" % bst.param["burst_id"])
 
+			## generate an energy-filtered lightcurve around the burst candidate
 			tstart=max(bst.param["gti_start"]-time_offset,0)
 			tstop=min(bst.param["gti_stop"]+time_offset,3600)
 			lc = LightCurve(
@@ -1019,30 +1020,35 @@ class EventData():
 				float(self.unixtime_offset),
 				tbin=tbin,tstart=tstart,tstop=tstop)
 
+			## plot the light curve
 			title = '%s (%s) burst-%d' % (self.basename, message, bst.param["burst_id"])
 			outpdf = '%s/%s_bst%02d_lc_%s.pdf' % (self.outdir,self.basename,bst.param["burst_id"],suffix)
 			lc.write(outpdf=outpdf,title=title,xlim=[tstart,tstop])	
 			self.pdflist.append(outpdf)	
 
+			## set initial parameters 
 			peak = lc.x[np.argmax(lc.y)]
 			sigma = (bst.param["gti_stop"] - bst.param["gti_start"])*0.3
 			area = sigma * max(lc.y) * 1.3
 			c0 = np.mean(lc.y[0:10])
 
 			par = {'peak':peak,'sigma':sigma,'area':area,'c0':c0,'c1':0}
-			print(par)
+			print("Initial parameters: %s" % par)
 
+			## fit the light curve by a gaussian 
 			par = lc.fit_gauss_linear(par,flag_error=True,fit_nsigma=fit_nsigma,flag_fit_nsigma=False)
-			print(par)
+			print("Gaussian fitting: %s" % par)
 			par["tbin"] = tbin
 			par["tbin_cumlc"] = tbin_cumlc			
 			par["energy_min"] = energy_min
 			par["energy_max"] = energy_max
 			bst.param["lcfit_param"] = par
 
+			## model Gaussian fitting 
 			model_x = lc.x
 			model_y = np.array([model_gauss_linear(x,peak=par['peak'],sigma=par['sigma'],area=par['area'],c0=par['c0'],c1=par['c1']) for x in model_x])	
 
+			## plot the fitting light curve
 			bst.lcfit_outpdf = '%s/%s_bst%02d_lcfit_%s.pdf' % (self.outdir,self.basename,bst.param["burst_id"],suffix)
 
 			legend_text = 'Burst light curve'
@@ -1069,6 +1075,7 @@ class EventData():
 				)
 			self.pdflist.append(bst.lcfit_outpdf)	
 
+			## cummulative light curve
 			cumlc = LightCurve(
 				np.array(self.df[mask]['unixtime']),
 				float(self.unixtime_offset),
@@ -1096,6 +1103,7 @@ class EventData():
 				)	
 			self.pdflist.append(bst.cumlc_outpdf)	
 
+			## extract burst spectral file within T80 
 			mask_bst_time = np.logical_and(
 				self.df['unixtime'] >= float(self.unixtime_offset) + float(bst.param["at10percent"]),
 				self.df['unixtime'] < float(self.unixtime_offset) + float(bst.param["at90percent"]))
@@ -1105,20 +1113,19 @@ class EventData():
 				exposure=float(bst.param['t80']),
 				outpha=src_outpha)
 
-			bgd_tstart_offset = 100
-			bgd_duration = 600
-			if float(bst.param["at90percent"]) + bgd_tstart_offset + bgd_duration < 3600.0:
-				bgd_tstart = bgd_tstart_offset
-				bgd_tstop = bgd_tstart_offset + bgd_duration			
+			## extract background spectral file 
+			if bgd_type is 'both':
+				pass
+			elif btd_type is 'after':
+				if float(bst.param["at90percent"]) + bgd_tgap + bgd_duration < 3600.0:
+					bgd_tstart = bgd_tgap
+					bgd_tstop = bgd_tgap + bgd_duration			
+				else:
+					bgd_tstart = bgd_tgap
+					bgd_tstop = 3600
 			else:
-				bgd_tstart = -(bgd_tstart_offset + bgd_duration)
-				bgd_tstop = -bgd_tstart_offset				
-			#if float(bst.param["lcfit_param"]['peak']) < 1500.0:
-			#	bgd_tstart = 200
-			#	bgd_tstop = 800			
-			#else:
-			#	bgd_tstart = -800
-			#	bgd_tstop = -200			
+				bgd_tstart = -(bgd_tgap + bgd_duration)
+				bgd_tstop = -bgd_tgap				
 			mask_bgd_time = np.logical_and(
 				self.df['unixtime'] >= float(self.unixtime_offset) + float(bst.param["at90percent"] + bgd_tstart ),
 				self.df['unixtime'] < float(self.unixtime_offset) + float(bst.param["at90percent"] + bgd_tstop))
@@ -1128,6 +1135,7 @@ class EventData():
 				exposure=bgd_tstop-bgd_tstart,
 				outpha=bgd_outpha)
 
+			### binning spectral file 
 			src_bin_outpha = '%s/%s_bst%02d_src_bin.pha' % (self.outdir,self.basename,bst.param["burst_id"])
 			script_bin = '%s/%s_bst%02d_grpbin.sh' % (self.outdir,self.basename,bst.param["burst_id"])
 
@@ -1162,6 +1170,7 @@ class EventData():
 			sub_wbgd_outps = '%s/%s_bst%02d_sub_wbgd.ps' % (self.outdir,self.basename,bst.param["burst_id"])
 			sub_wbgd_outpdf = '%s/%s_bst%02d_sub_wbgd.pdf' % (self.outdir,self.basename,bst.param["burst_id"])
 
+			### plot the spectral file 
 			cmd  = 'xspec << EOF\n'
 			cmd += 'data 1:1 %s\n' % src_bin_outpha
 			cmd += 'resp 1:1 %s\n' % RESPFILE
@@ -1180,22 +1189,6 @@ class EventData():
 			cmd += 'r x 0.2 40.0\n'
 			cmd += 'hard %s/cps\n' % sub_outps			
 			cmd += 'exit\n'
-#			cmd += 'data 2:2 %s\n' % bgd_outpha
-#			cmd += 'resp 2:2 ../../cogamo/growth-bgo.rsp\n'
-#			cmd += 'setp rebin 10 30 2\n'
-#			cmd += 'ignore 2:**-0.2\n'
-#			cmd += 'iplot ld\n'
-##			cmd += 'line on 2\n'
-#			cmd += 'lwid 5\n'
-#			cmd += 'lwid 5\n'
-#			cmd += 'lwid 5 on 1..100\n'			
-#			cmd += 'time off\n'
-#			cmd += 'la t %s Bst-ID %s (w/ bgd)\n' % (self.basename,bst.param["burst_id"])
-#			cmd += 'la y Counts sec\\u-1\\d MeV\\u-1\\d\n'
-#			cmd += 'lab rotate\n'
-#			cmd += 'r x 0.2 40.0\n'
-#			cmd += 'hard %s/cps\n' % sub_wbgd_outps			
-#			cmd += 'exit\n'
 			cmd += 'exit\n'			
 			cmd += 'EOF\n'
 			print(cmd)
@@ -1239,12 +1232,88 @@ class EventData():
 			f = open(fcmd,'w')
 			f.write(cmd)
 			f.close()
-
 			os.system(cmd)
 
 			os.system('ps2pdf %s' % sub_wbgd_outps)
 			os.system('mv %s %s' % (os.path.basename(sub_wbgd_outpdf),self.outdir))
 			bst.subspec_wbgd_pdf = sub_wbgd_outpdf
+
+			# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+			### plot two energy band for publication (summary plot)
+			fig, axs = plt.subplots(2,1, figsize=(11.69,8.27), 
+				sharex=True, gridspec_kw={'hspace': 0})
+
+			energy_min_threshold = 0.5
+			mask1, message1, suffix1 = self.get_energy_mask(
+				energy_min=energy_min_threshold,energy_max=energy_min)
+			mask2, message2, suffix2 = self.get_energy_mask(
+				energy_min=energy_min,energy_max=energy_max)			
+
+			time_peak_str = datetime.fromtimestamp(float(self.unixtime_offset)+float(par['peak']))
+
+			title = 'Cogamo ID %s, ' % self.detid_str
+			title += 'time bin %.1f sec, ' % tbin
+			title += 'glow %.1f counts (Gauss fit), ' % (par['area']/tbin)
+			title += 'T80=%.1f sec' %  bst.param["t80"]
+			tstart_summary = -500
+			tstop_summary  = 500
+			lc1 = LightCurve(
+				np.array(self.df[mask1]['unixtime']),
+				float(self.unixtime_offset)+par['peak'],
+				tbin=tbin,tstart=tstart_summary,tstop=tstop_summary)
+			lc2 = LightCurve(
+				np.array(self.df[mask2]['unixtime']),
+				float(self.unixtime_offset)+par['peak'],
+				tbin=tbin,tstart=tstart_summary,tstop=tstop_summary)
+
+			label1 = '%.1f-%.1f MeV'%(energy_min_threshold,energy_min)
+			axs[0].errorbar(
+				lc1.x,lc1.rate,yerr=lc1.rate_err,fmt='o',label=label1,
+				c='k',ls='',markersize=3,linewidth=1,ecolor='k')	
+			axs[0].step(
+				lc1.x,lc1.rate,
+				'-', c='k',mec='k', markersize=2, where='mid')		
+			axs[0].set_title(title,fontsize=18)
+			axs[0].set_ylabel(r"Count sec$^{-1}$",fontsize=18,labelpad=12)
+			axs[0].legend(loc='upper left',fontsize=18)
+			yval_line = 34
+			axs[0].plot([bst.param["at10percent"]-par['peak'],bst.param["at90percent"]-par['peak']],[yval_line,yval_line],c='salmon',ls='-',linewidth=5)
+			axs[0].plot([bst.param["at90percent"]-par['peak']+bgd_tstart,bst.param["at90percent"]-par['peak']+bgd_tstop],[yval_line,yval_line],c='royalblue',ls='-',linewidth=5)
+
+			label2 = '%.1f-%.1f MeV' % (energy_min,energy_max)
+			axs[1].errorbar(
+				lc2.x,lc2.rate,yerr=lc2.rate_err,fmt='o',label=label2,
+				c='k',ls='',markersize=3,linewidth=1,ecolor='k')	
+			axs[1].step(
+				lc2.x,lc2.rate,
+				'-', c='k',mec='k', markersize=2, where='mid')
+			axs[1].set_xlabel("Time (sec) since %s (JST)" % time_peak_str.strftime("%Y-%m-%d %H:%M:%S"), fontsize=18,labelpad=12)
+			axs[1].set_ylabel(r"Count sec$^{-1}$",fontsize=18,labelpad=12)			
+			axs[1].legend(loc='upper left',fontsize=18)
+
+			for ax in axs:
+				ax.minorticks_on()
+				#ax.grid(True)
+				#ax.grid(axis='both',which='major', linestyle='--', color='#000000')
+				#ax.grid(axis='both',which='minor', linestyle='--')	
+				ax.tick_params(axis="both",which='major',direction='in',length=6,labelsize=18)
+				ax.tick_params(axis="both",which='minor',direction='in',length=6)
+				ax.axvline(x=bst.param["at10percent"]-par['peak'],c='r',ls='--')
+				ax.axvline(x=bst.param["at90percent"]-par['peak'],c='r',ls='--')
+				ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+
+			plt.xticks(fontsize=18) #, rotation=90)
+			plt.yticks(fontsize=18) #, rotation=90)
+			plt.xlim(tstart_summary,tstop_summary)
+			#plt.tick_params(labelsize=18)
+			plt.rcParams["font.family"] = "serif"
+			plt.rcParams["mathtext.fontset"] = "dejavuserif"	
+			plt.tight_layout(pad=2)
+			fig.align_ylabels(axs)
+
+			outpdf = '%s/%s_bst%02d_lc.pdf' % (self.outdir,self.basename,bst.param["burst_id"])
+			plt.savefig(outpdf)	
+			# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 			self.pdflist.append(sub_outpdf)	
 			self.pdflist.append(sub_wbgd_outpdf)				
@@ -1360,6 +1429,7 @@ class Burst():
 		yamlfile = '%s/%s_bst%02d.yaml' % (self.eventdata.outdir,self.eventdata.basename,self.param["burst_id"])
 		with open(yamlfile, "w") as wf:
 		    yaml.dump(self.param, wf,default_flow_style=False)		
+
 	def add_to_catalog(self):
 		if self.catalog is not None:		
 			self.catalog.dict['peaktime'].append(self.param["jsttime_peak"])
