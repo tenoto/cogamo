@@ -135,7 +135,9 @@ def extract_xspec_pha(energy_keV_array,outpha,exposure,
 	print(cmd);os.system(cmd)
 
 
-def fit_xspec(src_pha,bgd_pha,resp,outdir,basename,emin_mev=0.3,emax_mev=10.0):
+def fit_xspec(src_pha,bgd_pha,resp,outdir,basename,
+	emin_mev=0.3,emax_mev=40.0,title='',
+	band1_str='**-0.5,3.0-**',band2_str='**-3.0,10.0-**'):
 	sys.stdout.write('----- {} -----\n'.format(sys._getframe().f_code.co_name))
 
 	dump  = "data 1:1 %s\n" % src_pha
@@ -158,6 +160,7 @@ def fit_xspec(src_pha,bgd_pha,resp,outdir,basename,emin_mev=0.3,emax_mev=10.0):
 
 	flog = '%s/%s_fit_xspec_out.log' % (outdir,basename)
 	fxcm = '%s/%s_fit_xspec_out.xcm' % (outdir,basename)	
+	outps = '%s_fit_xspec_out.ps' % (basename)	
 
 	### plot the spectral file 
 	cmd  = 'xspec << EOF\n'
@@ -166,22 +169,37 @@ def fit_xspec(src_pha,bgd_pha,resp,outdir,basename,emin_mev=0.3,emax_mev=10.0):
 	cmd += 'notice **-**\n'
 	cmd += 'ignore **-%.1f,%.1f-**\n' % (emin_mev,emax_mev)
 	cmd += 'query yes\n'
-	cmd += 'fit\n'
+	cmd += 'fit\n'			
+	cmd += 'save all %s\n' % fxcm
+	cmd += 'iplot ld del\n'
+	cmd += 'csize 1.2\n'
+	cmd += 'lab pos y 2.3\n'
+	cmd += 'la t %s\n' % title	
+	cmd += 'lwid 5\n'
+	cmd += 'lwid 5\n'
+	cmd += 'lwid 5 on 1..100\n'			
+	cmd += 'time off\n'
+	cmd += 'lab rotate\n'
+	cmd += 'r x 0.2 25\n'
+	cmd += 'la y Counts sec\\u-1\\d MeV\\u-1\\d\n'
+	cmd += 'col 2 on 2\n'	
+	cmd += 'win 2 \n'
+	cmd += 'lab 2 col 2 lin 0 100 ls 2 jus lef pos 0.200000003 0 " " \n'
+	cmd += 'r y2 -7 7\n'
+	cmd += 'lab rotate\n'
+	cmd += 'r x 0.2 40.0\n'
+	cmd += 'hard %s/cps\n' % outps			
+	cmd += 'exit\n'
 	cmd += 'log %s\n' % flog
 	cmd += 'show all\n'	
-	cmd += 'log none\n'				
-	cmd += 'save all %s\n' % fxcm
-	#cmd += 'iplot ld\n'
-	#cmd += 'lwid 5\n'
-	#cmd += 'lwid 5\n'
-	#cmd += 'lwid 5 on 1..100\n'			
-	#cmd += 'time off\n'
-	#cmd += 'la t %s Bst-ID %s\n' % (self.basename,bst.param["burst_id"])
-	#cmd += 'la y Counts sec\\u-1\\d MeV\\u-1\\d\n'
-	#cmd += 'lab rotate\n'
-	#cmd += 'r x 0.2 40.0\n'
-	#cmd += 'hard %s/cps\n' % sub_outps			
-	#cmd += 'exit\n'
+	cmd += 'err 1.0 3,4,5\n'
+	cmd += 'notice **-**\n'
+	cmd += 'ignore %s\n' % band1_str
+	cmd += 'show rate\n'
+	cmd += 'notice **-**\n'
+	cmd += 'ignore %s\n' % band2_str	
+	cmd += 'show rate\n'	
+	cmd += 'log none\n'		
 	cmd += 'exit\n'				
 	cmd += 'EOF\n'
 	print(cmd)
@@ -193,8 +211,93 @@ def fit_xspec(src_pha,bgd_pha,resp,outdir,basename,emin_mev=0.3,emax_mev=10.0):
 
 	os.system(cmd)
 
-	#os.system('ps2pdf %s' % sub_outps)
-	#os.system('mv %s %s' % (os.path.basename(sub_outpdf),self.outdir))
+	outpdf = os.path.splitext(outps)[0] + '.pdf'
+	os.system('ps2pdf %s' % outps)
+	os.system('mv %s %s; rm -f %s' % (outpdf,outdir,outps))
+
+	error_ready = False 
+	band1_flag = False
+	band2_flag = False	
+	for line in open(flog):
+		cols = line.split()
+		print(band1_flag,band2_flag,cols)
+		if not len(cols) > 2:
+			continue 
+		if 'Confidence' in cols:
+			error_ready = True
+		if cols[1] == '3' and cols[4] == 'lg10Flux':
+			lg10Flux = float(cols[6])
+		if cols[1] == '4' and cols[4] == 'index':
+			index = float(cols[5])	
+		if cols[1] == '5' and cols[4] == 'Ecutoff':
+			Ecutoff = float(cols[5])
+		if error_ready is True and (cols[2] != 'channels'):
+			if cols[1] == '3':
+				lg10Flux_max = float(cols[3])
+				lg10Flux_min = float(cols[2])
+				flux = 10**lg10Flux
+				flux_err_up = 10**(lg10Flux_max)-10**lg10Flux
+				flux_err_down = -10**(lg10Flux_min)+10**lg10Flux
+			if cols[1] == '4':
+				index_min = float(cols[2])				
+				index_max = float(cols[3])
+				index_err_up = index_max - index
+				index_err_down = index_min - index				
+			if cols[1] == '5':
+				Ecutoff_min = float(cols[2])	
+				Ecutoff_max = float(cols[3])
+				Ecutoff_err_up = Ecutoff_min - Ecutoff
+				Ecutoff_err_down = Ecutoff_max - Ecutoff				
+		if band1_str in str(cols[2]):
+			band1_flag = True
+		if band1_flag and (str(cols[0]) == '#Net'):
+			band1_rate = float(cols[6])
+			band1_rate_err = float(cols[8])
+			band1_flag = False
+
+		if band2_str in str(cols[2]):
+			band2_flag = True
+		if band2_flag and (str(cols[0]) == '#Net'):
+			band2_rate = float(cols[6])
+			band2_rate_err = float(cols[8])
+			band2_flag = False
+
+	chisquare = grep(flog,"#Test statistic :",4)[-1]
+	dof = grep(flog,"# Null hypothesis probability of",7,dtype=int)[-1]
+	reduced_chisquare = chisquare / float(dof)
+
+	fitpar = {}
+	fitpar["flux"] = flux
+	fitpar["flux_err_up"] = flux_err_up	
+	fitpar["flux_err_down"] = flux_err_down		
+	fitpar["index"] = index			
+	fitpar["index_err_up"] = index_err_up			
+	fitpar["index_err_down"] = index_err_down					
+	fitpar["Ecutoff"] = Ecutoff				
+	fitpar["Ecutoff_err_up"] = Ecutoff_err_up				
+	fitpar["Ecutoff_err_down"] = Ecutoff_err_down						
+	fitpar["chisquare"] = chisquare	
+	fitpar["dof"] = dof	
+	fitpar["reduced_chisquare"] = reduced_chisquare	
+	fitpar["band1_rate"] = band1_rate	
+	fitpar["band1_rate_err"] = band1_rate_err	
+	fitpar["band2_rate"] = band2_rate	
+	fitpar["band2_rate_err"] = band2_rate_err	
+	fitpar["xspec_fit_pdf"]	= '%s/%s' % (outdir,outpdf)
+	print(fitpar)
+
+	return fitpar
+
+def grep(logfile,keyword,colnum,dtype=float):
+	out_word_list = []
+	for line in open(logfile):
+		if keyword in line:
+			cols = line.split()
+			if dtype == float:
+				out_word_list.append(float(cols[colnum]))
+			elif dtype == int:
+				out_word_list.append(int(cols[colnum]))				
+	return out_word_list
 
 def run(param_yamlfile):
 	pipe = Pipeline(param_yamlfile)
@@ -882,14 +985,24 @@ class EventData():
 
 		return mask, message, suffix 	
 
-	def search_burst(self,lc,threshold_sigma=4.0,catalog=None):
+	def search_burst(self,lc,threshold_sigma=4.0,catalog=None,maximum_trial=5):
 		sys.stdout.write('----- {} -----\n'.format(sys._getframe().f_code.co_name))
 
-		self.par_curve_stat = lc.set_gaussian_stat(
-			threshold_sigma=threshold_sigma,
-			outpdf='%s/%s_cnthist_gaussfit.pdf' % (self.outdir,self.basename),
-			title='%s Burst search (%s) %d-sigma' % (self.basename, lc.message, threshold_sigma)
-			)		
+		for i in range(maximum_trial):
+			try:
+				self.par_curve_stat = lc.set_gaussian_stat(
+					threshold_sigma=threshold_sigma,
+					outpdf='%s/%s_cnthist_gaussfit.pdf' % (self.outdir,self.basename),
+					title='%s Burst search (%s) %d-sigma' % (self.basename, lc.message, threshold_sigma))
+			except Exception as e:
+				sys.stdout.write('Warning %s: trial error %d/%d\n' % (sys._getframe().f_code.co_name, i, maximum_trial))
+				pass
+			else:
+				sys.stdout.write('Log %s: ok %d/%d\n' % (sys._getframe().f_code.co_name, i, maximum_trial))		    	
+				break
+		else:
+			sys.stdout.write('Error %s: trial error %d/%d\n' % (sys._getframe().f_code.co_name, i, maximum_trial))
+			pass 
 
 		threshold_count = self.par_curve_stat['peak'] + threshold_sigma * self.par_curve_stat['sigma']
 		self.par_curve_stat['threshold_sigma'] = threshold_sigma	
@@ -1172,8 +1285,9 @@ class EventData():
 				binsize = p1 - p0 + 1 
 				dump += 'group %d %d %d\n' % (p0, p1, binsize)
 			dump += 'group 498 697 200\n' # 10-14 MeV
-			dump += 'group 698 997 300\n' # 14-20 MeV
-			dump += 'group 998 1497 500\n' # 20-30 MeV
+			dump += 'group 698 2047 1350\n' # 14-40 MeV
+			#dump += 'group 698 997 300\n' # 14-20 MeV
+			#dump += 'group 998 1497 500\n' # 20-30 MeV
 			#dump += 'group 498 2047 1550\n'
 			dump += 'exit\n'
 			print(dump)
@@ -1258,13 +1372,22 @@ class EventData():
 			os.system('mv %s %s' % (os.path.basename(sub_wbgd_outpdf),self.outdir))
 			bst.subspec_wbgd_pdf = sub_wbgd_outpdf
 
-			fit_xspec(
+			time_peak_str = datetime.fromtimestamp(float(self.unixtime_offset)+float(par['peak']))
+
+			title  = 'Cogamo ID %s, ' % self.detid_str
+			title += '%s (JST), ' % time_peak_str.strftime("%Y-%m-%d %H:%M:%S")
+			title += 'T80=%.1f sec (exposure)' % float(bst.param['t80'])
+			fit_param = fit_xspec(
 				src_pha=src_bin_outpha,
 				bgd_pha=bgd_outpha,
 				resp=RESPFILE,
 				outdir=self.outdir,
-				basename='%s_%s' % (self.basename,bst.param["burst_id"]),
-				emin_mev=0.2,emax_mev=10.0)
+				basename='%s_bst%02d' % (self.basename,bst.param["burst_id"]),
+				emin_mev=0.2,emax_mev=40.1,
+				title=title)
+			for keyword in fit_param:
+				bst.param[keyword] = fit_param[keyword]
+			print(bst.param)			
 
 			# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 			### plot two energy band for publication (summary plot)
@@ -1277,7 +1400,6 @@ class EventData():
 			mask2, message2, suffix2 = self.get_energy_mask(
 				energy_min=energy_min,energy_max=energy_max)			
 
-			time_peak_str = datetime.fromtimestamp(float(self.unixtime_offset)+float(par['peak']))
 
 			title = 'Cogamo ID %s, ' % self.detid_str
 			title += 'time bin %.1f sec, ' % tbin
@@ -1348,6 +1470,8 @@ class EventData():
 
 			self.pdflist.append(sub_outpdf)	
 			self.pdflist.append(sub_wbgd_outpdf)				
+			self.pdflist.append(outpdf)						
+			self.pdflist.append(bst.param['xspec_fit_pdf'])				
 
 			bst.set_parameters()
 			bst.write_to_yamlfile()
