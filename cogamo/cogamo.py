@@ -136,7 +136,7 @@ def extract_xspec_pha(energy_keV_array,outpha,exposure,
 
 
 def fit_xspec(src_pha,bgd_pha,resp,outdir,basename,
-	emin_mev=0.3,emax_mev=40.0,title='',
+	emin_mev=0.3,emax_mev=40.0,title='',systematic=0.06,
 	band1_str='**-0.5,3.0-**',band2_str='**-3.0,10.0-**'):
 	sys.stdout.write('----- {} -----\n'.format(sys._getframe().f_code.co_name))
 
@@ -168,6 +168,7 @@ def fit_xspec(src_pha,bgd_pha,resp,outdir,basename,
 	cmd += 'setplot energy mev\n'
 	cmd += 'notice **-**\n'
 	cmd += 'ignore **-%.1f,%.1f-**\n' % (emin_mev,emax_mev)
+	cmd += 'systematic %.4f\n' % systematic
 	cmd += 'query yes\n'
 	cmd += 'fit\n'			
 	cmd += 'save all %s\n' % fxcm
