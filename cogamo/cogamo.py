@@ -111,14 +111,27 @@ def extract_xspec_pha(energy_keV_array,outpha,exposure,
 	cmd += 'outfile=%s ' % outpha
 	cmd += 'chanpres=no dtype=1 qerror=no rows=- fchan=0 tlmin=0 pois=no filter=NONE '
 	cmd += 'detchans=%d ' % number_of_channel
-	cmd += 'telescope=thdr '
-	cmd += 'instrume=cogamo2020 '
-	cmd += 'detnam=csi5x5x15 '
+	cmd += 'telescope="ThunderCloud" '
+	cmd += 'instrume="CogamoFY2020" '
+	cmd += 'detnam="CsI5x5x15cm" '
 	cmd += 'chantype=PI '
 	cmd += 'exposure=%.2f'  % exposure
 	print(cmd);os.system(cmd)
 
 	cmd = 'rm -f tmp_count.txt'
+	print(cmd);os.system(cmd)
+
+	cmd  = ''	
+	if start_unixtime is not None:
+		start_time_utc = Time(start_unixtime,format='unix',scale='utc')
+		start_time_jst = start_time_utc + timedelta(hours=+9)
+		cmd += 'fparkey %.8f %s[1] TSTART comm="Start unixtime in UTC" add=yes;\n' % (start_unixtime,outpha)
+		cmd += 'fparkey %s %s[1] STARTJST comm="Start time in JST (ISOT)" add=yes;\n' % (start_time_jst.isot,outpha)
+	if stop_unixtime is not None:
+		stop_time_utc = Time(stop_unixtime,format='unix',scale='utc')
+		stop_time_jst = stop_time_utc + timedelta(hours=+9)			
+		cmd += 'fparkey %.8f %s[1] TSTOP comm="Stop unixtime in UTC" add=yes;\n' % (stop_unixtime,outpha)
+		cmd += 'fparkey %s %s[1] STOPJST comm="Stop time in JST (ISOT)" add=yes;\n' % (stop_time_jst.isot,outpha)
 	print(cmd);os.system(cmd)
 
 """
@@ -1003,7 +1016,7 @@ class EventData():
 
 	def analysis_bursts(self,energy_min=3.0,energy_max=10.0,
 		tbin=8.0,time_offset=150.0,fit_nsigma=3,tbin_cumlc=1.0,
-		bgd_type="both",bgd_tgap=50,bgd_duration=350):
+		bgd_tgap_to_src=50,bgd_duration=200):
 		sys.stdout.write('----- {} -----\n'.format(sys._getframe().f_code.co_name))
 
 		mask, message, suffix = self.get_energy_mask(
@@ -1104,16 +1117,47 @@ class EventData():
 			self.pdflist.append(bst.cumlc_outpdf)	
 
 			## extract burst spectral file within T80 
+			src_tstart = float(self.unixtime_offset) + float(bst.param["at10percent"])
+			src_tstop = float(self.unixtime_offset) + float(bst.param["at90percent"])
 			mask_bst_time = np.logical_and(
-				self.df['unixtime'] >= float(self.unixtime_offset) + float(bst.param["at10percent"]),
-				self.df['unixtime'] < float(self.unixtime_offset) + float(bst.param["at90percent"]))
+				self.df['unixtime'] >= src_tstart,
+				self.df['unixtime'] < src_tstop)
 			src_outpha = '%s/%s_bst%02d_src.pha' % (self.outdir,self.basename,bst.param["burst_id"])
 			extract_xspec_pha(
 				energy_keV_array=np.array(self.df['energy_mev'][mask_bst_time]*1000.0),
 				exposure=float(bst.param['t80']),
-				outpha=src_outpha)
+				outpha=src_outpha,
+				start_unixtime=src_tstart,
+				stop_unixtime=src_tstop				
+				)
 
 			## extract background spectral file 
+			bgd_pre_tstart = max(float(self.unixtime_offset) + float(bst.param["at10percent"]) - bgd_tgap_to_src - bgd_duration,float(self.unixtime_offset))
+			bgd_pre_tstop = min(float(self.unixtime_offset) + float(bst.param["at10percent"]) - bgd_tgap_to_src,float(self.unixtime_offset)+3600.0)
+			bgd_pre_duration = bgd_pre_tstop - bgd_pre_tstart
+
+			mask_bgd_pre_time = np.logical_and(
+				self.df['unixtime'] >= bgd_pre_tstart,
+				self.df['unixtime'] < bgd_pre_tstop)
+			bgd_pre_outpha = '%s/%s_bst%02d_bgd_pre.pha' % (self.outdir,self.basename,bst.param["burst_id"])
+			extract_xspec_pha(
+				energy_keV_array=np.array(self.df['energy_mev'][mask_bgd_pre_time]*1000.0),
+				exposure=bgd_pre_duration,outpha=bgd_pre_outpha,
+				start_unixtime=bgd_pre_tstart,stop_unixtime=bgd_pre_tstop)
+
+			bgd_post_tstart = max(float(self.unixtime_offset) + float(bst.param["at90percent"]) + bgd_tgap_to_src,float(self.unixtime_offset))
+			bgd_post_tstop = min(float(self.unixtime_offset) + float(bst.param["at90percent"]) + bgd_tgap_to_src + bgd_duration,float(self.unixtime_offset)+3600.0)
+			bgd_post_duration = bgd_post_tstop - bgd_post_tstart
+
+			mask_bgd_post_time = np.logical_and(
+				self.df['unixtime'] >= bgd_post_tstart,
+				self.df['unixtime'] < bgd_post_tstop)
+			bgd_post_outpha = '%s/%s_bst%02d_bgd_post.pha' % (self.outdir,self.basename,bst.param["burst_id"])
+			extract_xspec_pha(
+				energy_keV_array=np.array(self.df['energy_mev'][mask_bgd_post_time]*1000.0),
+				exposure=bgd_post_duration,outpha=bgd_post_outpha,
+				start_unixtime=bgd_post_tstart,stop_unixtime=bgd_post_tstop)
+			"""
 			if bgd_type is 'both':
 				pass
 			elif btd_type is 'after':
@@ -1122,10 +1166,11 @@ class EventData():
 					bgd_tstop = bgd_tgap + bgd_duration			
 				else:
 					bgd_tstart = bgd_tgap
-					bgd_tstop = 3600
+					bgd_tstop = 3600 - bgd_tstart
 			else:
 				bgd_tstart = -(bgd_tgap + bgd_duration)
-				bgd_tstop = -bgd_tgap				
+				bgd_tstop = -bgd_tgap	
+
 			mask_bgd_time = np.logical_and(
 				self.df['unixtime'] >= float(self.unixtime_offset) + float(bst.param["at90percent"] + bgd_tstart ),
 				self.df['unixtime'] < float(self.unixtime_offset) + float(bst.param["at90percent"] + bgd_tstop))
@@ -1134,6 +1179,17 @@ class EventData():
 				energy_keV_array=np.array(self.df['energy_mev'][mask_bgd_time]*1000.0),
 				exposure=bgd_tstop-bgd_tstart,
 				outpha=bgd_outpha)
+			"""
+
+			bgd_outpha = '%s/%s_bst%02d_bgd_add.pha' % (self.outdir,self.basename,bst.param["burst_id"])
+			cmd = 'ln -s %s .;\n' % bgd_pre_outpha
+			cmd += 'ln -s %s .;\n' % bgd_post_outpha			
+			cmd += 'mathpha %s+%s ' % (os.path.basename(bgd_pre_outpha),os.path.basename(bgd_post_outpha))
+			cmd += 'units=C outfil=%s ' % bgd_outpha
+			cmd += 'exposure=CALC areascal=NULL ncomments=0;\n'
+			cmd += 'rm -f %s %s;\n' % (os.path.basename(bgd_pre_outpha),os.path.basename(bgd_post_outpha))
+			cmd += 'mv %s %s;\n' % (bgd_outpha,self.outdir)
+			print(cmd);os.system(cmd)
 
 			### binning spectral file 
 			src_bin_outpha = '%s/%s_bst%02d_src_bin.pha' % (self.outdir,self.basename,bst.param["burst_id"])
@@ -1276,9 +1332,12 @@ class EventData():
 			axs[0].set_title(title,fontsize=18)
 			axs[0].set_ylabel(r"Count sec$^{-1}$",fontsize=18,labelpad=12)
 			axs[0].legend(loc='upper left',fontsize=18)
-			yval_line = 34
-			axs[0].plot([bst.param["at10percent"]-par['peak'],bst.param["at90percent"]-par['peak']],[yval_line,yval_line],c='salmon',ls='-',linewidth=5)
-			axs[0].plot([bst.param["at90percent"]-par['peak']+bgd_tstart,bst.param["at90percent"]-par['peak']+bgd_tstop],[yval_line,yval_line],c='royalblue',ls='-',linewidth=5)
+
+			#yval_line = 34
+			yval_line =0.13* (max(lc1.rate)-min(lc1.rate)) + min(lc1.rate)
+			axs[0].plot([bst.param["at10percent"]-par['peak'],bst.param["at90percent"]-par['peak']],[yval_line,yval_line],c='salmon',ls='-',linewidth=5,alpha=0.7)
+			axs[0].plot([bst.param["at90percent"]-par['peak']+bgd_tgap_to_src,bst.param["at90percent"]-par['peak']+bgd_tgap_to_src+bgd_duration],[yval_line,yval_line],c='royalblue',ls='-',linewidth=5,alpha=0.7)
+			axs[0].plot([bst.param["at10percent"]-par['peak']-bgd_tgap_to_src-bgd_duration,bst.param["at10percent"]-par['peak']-bgd_tgap_to_src],[yval_line,yval_line],c='royalblue',ls='-',linewidth=5,alpha=0.7)			
 
 			label2 = '%.1f-%.1f MeV' % (energy_min,energy_max)
 			axs[1].errorbar(
