@@ -113,7 +113,7 @@ def extract_xspec_pha(energy_keV_array,outpha,exposure,
 	cmd += 'detchans=%d ' % number_of_channel
 	cmd += 'telescope="ThunderCloud" '
 	cmd += 'instrume="CogamoFY2020" '
-	cmd += 'detnam="CsI5x5x15cm" '
+	cmd += 'detnam="CsI5x15Flat" '
 	cmd += 'chantype=PI '
 	cmd += 'exposure=%.2f'  % exposure
 	print(cmd);os.system(cmd)
@@ -134,83 +134,67 @@ def extract_xspec_pha(energy_keV_array,outpha,exposure,
 		cmd += 'fparkey %s %s[1] STOPJST comm="Stop time in JST (ISOT)" add=yes;\n' % (stop_time_jst.isot,outpha)
 	print(cmd);os.system(cmd)
 
-"""
-def extract_xspec_pha(energy_keV_array,outpha,exposure,
-	gti=None,start_unixtime=None,stop_unixtime=None):
-	number_of_channel = 2048
-	energy_min = 40 # keV 
-	energy_step = 20 # keV 
 
-	energy_max = energy_min + energy_step * number_of_channel
-	hist = Hist1D(nbins=number_of_channel,xlow=energy_min,xhigh=energy_max)
-	hist.fill(energy_keV_array)
+def fit_xspec(src_pha,bgd_pha,resp,outdir,basename,emin_mev=0.3,emax_mev=10.0):
+	sys.stdout.write('----- {} -----\n'.format(sys._getframe().f_code.co_name))
 
-	col_channel = fits.Column(name='CHANNEL',format="J", array=np.arange(number_of_channel))
-	col_counts = fits.Column(name='COUNTS',format="J",unit="count",	array=hist.y)
-	#col_quality = fits.Column(name='QUALITY',format="I",unit="",array=np.full(0,number_of_channel))
-	#col_grouping = fits.Column(name='GROUPING',format="I",unit="",array=np.full(1,number_of_channel))
+	dump  = "data 1:1 %s\n" % src_pha
+	dump += "backgrnd 1 %s\n" % bgd_pha
+	dump += "response 1:1 %s\n" % resp
+	dump += "mdefine growth_pl E^(-1*index)EXP(-(E/(Ecutoff*1000.0))^alpha) : add\n"
+	dump += "model  cflux*growth_pl\n"
+	dump += "200      -0.1          0          0      1e+06      1e+06\n"
+	dump += "20000    -0.1          0          0      1e+06      1e+06\n"
+	dump += "-6       0.01       -100       -100        100        100\n"
+	dump += "0.3      0.01        -10		 -10         10         10\n"
+	dump += "4.0      0.01       0.01        0.01       100        100\n"
+	dump += "1         -1      1e-22      1e-22      1e+22      1e+22\n"
+	dump += "1         -1          0          0      1e+20      1e+24\n"
 
-	#hdu1 = fits.BinTableHDU.from_columns([col_channel,col_counts,col_quality,col_grouping])
-	hdu1 = fits.BinTableHDU.from_columns([col_channel,col_counts])
-	hdu1.name = 'SPECTRUM'
+	initial_xcm = "%s/%s_fit_xspec_init.xcm" % (outdir,basename)
+	f = open(initial_xcm,'w')
+	f.write(dump)
+	f.close()
 
-	if gti is not None:
-		gti_start = fits.Column(name='START',format="1D",unit="s",array=np.array(gti[0]))
-		gti_stop = fits.Column(name='STOP',format="1D",unit="s",array=np.array(gti[1]))
-		hdu2 = fits.BinTableHDU.from_columns([gti_start,gti_stop])
-		hdu2.name = 'GTI'
+	flog = '%s/%s_fit_xspec_out.log' % (outdir,basename)
+	fxcm = '%s/%s_fit_xspec_out.xcm' % (outdir,basename)	
 
-	prhdu = fits.PrimaryHDU()
-	if gti is None:
-		hdulist = fits.HDUList([prhdu, hdu1])
-	else:
-		hdulist = fits.HDUList([prhdu, hdu1, hdu2])
+	### plot the spectral file 
+	cmd  = 'xspec << EOF\n'
+	cmd += '@%s\n' % initial_xcm
+	cmd += 'setplot energy mev\n'
+	cmd += 'notice **-**\n'
+	cmd += 'ignore **-%.1f,%.1f-**\n' % (emin_mev,emax_mev)
+	cmd += 'query yes\n'
+	cmd += 'fit\n'
+	cmd += 'log %s\n' % flog
+	cmd += 'show all\n'	
+	cmd += 'log none\n'				
+	cmd += 'save all %s\n' % fxcm
+	#cmd += 'iplot ld\n'
+	#cmd += 'lwid 5\n'
+	#cmd += 'lwid 5\n'
+	#cmd += 'lwid 5 on 1..100\n'			
+	#cmd += 'time off\n'
+	#cmd += 'la t %s Bst-ID %s\n' % (self.basename,bst.param["burst_id"])
+	#cmd += 'la y Counts sec\\u-1\\d MeV\\u-1\\d\n'
+	#cmd += 'lab rotate\n'
+	#cmd += 'r x 0.2 40.0\n'
+	#cmd += 'hard %s/cps\n' % sub_outps			
+	#cmd += 'exit\n'
+	cmd += 'exit\n'				
+	cmd += 'EOF\n'
+	print(cmd)
 
-	for hdu in hdulist:
-		hdu.header['HDUCLASS'] = 'OGIP'
-		hdu.header['HDUCLAS1'] = 'SPECTRUM'
-		hdu.header['HDUVERS1'] = '1.1.0   '   	
-		hdu.header['HDUVERS'] = '1.1.0   '
-		hdu.header['HDUCLAS2'] = ('UNKNOWN ','WARNING This is NOT an OGIP-approved value')
-		hdu.header['HDUCLAS3'] = ('COUNT   ','PHA data stored as Counts (not count/s)')		
-		hdu.header['TELESCOP']= ('ThundercloudProject','mission/satellite name')
-		hdu.header['INSTRUME']= ('CogamoFY2020','instrument/detector name')
-		hdu.header['EXPOSURE'] = (exposure,'Exposure time (sec)')
+	fcmd = '%s/%s_fit_xspec.cmd' % (outdir,basename)
+	f = open(fcmd,'w')
+	f.write(cmd)
+	f.close()
 
-		if start_unixtime is not None:
-			hdu.header['TSTART'] = (start_unixtime, 'start unixtime in UTC')
-			start_time_utc = Time(start_unixtime,format='unix',scale='utc')
-			start_time_jst = start_time_utc + timedelta(hours=+9)
-			hdu.header['STARTJST'] = (start_time_jst.isot, 'Start time in JST (ISOT)')
-		if stop_unixtime is not None:
-			hdu.header['TSTOP'] = (stop_unixtime, 'stop unixtime in UTC')
-			stop_time_utc = Time(stop_unixtime,format='unix',scale='utc')
-			stop_time_jst = stop_time_utc + timedelta(hours=+9)			
-			hdu.header['STOPJST'] = (stop_time_jst.isot, 'Stop time in JST (ISOT)')
+	os.system(cmd)
 
-	hdu1.header['TLMIN1']  = 0   
-	hdu1.header['TLMAX1']  = number_of_channel-1
-	hdu1.header['FILTER']  = 'UNKNOWN '
-	hdu1.header['AREASCAL'] = (1.0,'Area scaling factor')
-	hdu1.header['BACKFILE'] = ('NONE','Background FITS file')
-	hdu1.header['BACKSCAL'] = (1.0,'Background scale factor')
-	hdu1.header['RESPFILE'] = ('NONE','redistribution matrix')	
-	hdu1.header['ANCRFILE'] = ('NONE','ancillary response')
-	hdu1.header['CORRFILE'] = ('NONE','Correlation FITS file')
-	hdu1.header['CORRSCAL'] = (1.0,'Correlation scale factor')
-	hdu1.header['PHAVERSN'] = ('1992a','obsolete')
-	hdu1.header['CHANTYPE'] = ('PI','channel type (PHA, PI etc)')
-	hdu1.header['POISSERR'] = (True,'Poissonian errors to be assumed')
-	hdu1.header['STAT_ERR'] = (0,'no statistical error specified')
-	hdu1.header['SYS_ERR'] = (0,'no systematic error specified')
-	hdu1.header['GROUPING'] = (0,'no grouping of the data has been defined')
-	hdu1.header["DETCHANS"] = (number_of_channel,'total number possible channels')
-
-	if os.path.exists(outpha):
-		cmd = 'rm -f %s' % outpha
-		print(cmd);os.system(cmd)
-	hdulist.writeto(outpha)  
-"""
+	#os.system('ps2pdf %s' % sub_outps)
+	#os.system('mv %s %s' % (os.path.basename(sub_outpdf),self.outdir))
 
 def run(param_yamlfile):
 	pipe = Pipeline(param_yamlfile)
@@ -1157,29 +1141,6 @@ class EventData():
 				energy_keV_array=np.array(self.df['energy_mev'][mask_bgd_post_time]*1000.0),
 				exposure=bgd_post_duration,outpha=bgd_post_outpha,
 				start_unixtime=bgd_post_tstart,stop_unixtime=bgd_post_tstop)
-			"""
-			if bgd_type is 'both':
-				pass
-			elif btd_type is 'after':
-				if float(bst.param["at90percent"]) + bgd_tgap + bgd_duration < 3600.0:
-					bgd_tstart = bgd_tgap
-					bgd_tstop = bgd_tgap + bgd_duration			
-				else:
-					bgd_tstart = bgd_tgap
-					bgd_tstop = 3600 - bgd_tstart
-			else:
-				bgd_tstart = -(bgd_tgap + bgd_duration)
-				bgd_tstop = -bgd_tgap	
-
-			mask_bgd_time = np.logical_and(
-				self.df['unixtime'] >= float(self.unixtime_offset) + float(bst.param["at90percent"] + bgd_tstart ),
-				self.df['unixtime'] < float(self.unixtime_offset) + float(bst.param["at90percent"] + bgd_tstop))
-			bgd_outpha = '%s/%s_bst%02d_bgd.pha' % (self.outdir,self.basename,bst.param["burst_id"])
-			extract_xspec_pha(
-				energy_keV_array=np.array(self.df['energy_mev'][mask_bgd_time]*1000.0),
-				exposure=bgd_tstop-bgd_tstart,
-				outpha=bgd_outpha)
-			"""
 
 			bgd_outpha = '%s/%s_bst%02d_bgd_add.pha' % (self.outdir,self.basename,bst.param["burst_id"])
 			cmd = 'ln -s %s .;\n' % bgd_pre_outpha
@@ -1210,7 +1171,10 @@ class EventData():
 				p1 = int(round(tmp_float_pi[i+1]))
 				binsize = p1 - p0 + 1 
 				dump += 'group %d %d %d\n' % (p0, p1, binsize)
-			dump += 'group 498 2047 1550\n'
+			dump += 'group 498 697 200\n' # 10-14 MeV
+			dump += 'group 698 997 300\n' # 14-20 MeV
+			dump += 'group 998 1497 500\n' # 20-30 MeV
+			#dump += 'group 498 2047 1550\n'
 			dump += 'exit\n'
 			print(dump)
 			f.write(dump)
@@ -1293,6 +1257,14 @@ class EventData():
 			os.system('ps2pdf %s' % sub_wbgd_outps)
 			os.system('mv %s %s' % (os.path.basename(sub_wbgd_outpdf),self.outdir))
 			bst.subspec_wbgd_pdf = sub_wbgd_outpdf
+
+			fit_xspec(
+				src_pha=src_bin_outpha,
+				bgd_pha=bgd_outpha,
+				resp=RESPFILE,
+				outdir=self.outdir,
+				basename='%s_%s' % (self.basename,bst.param["burst_id"]),
+				emin_mev=0.2,emax_mev=10.0)
 
 			# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 			### plot two energy band for publication (summary plot)

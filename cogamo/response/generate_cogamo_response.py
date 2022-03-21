@@ -80,6 +80,9 @@ DEGRADATION_PIVOT = param['DEGRADATION_PIVOT']
 DEGRADATION_NORM = param['DEGRADATION_NORM']
 RESP_FILENAME = param['RESP_FILENAME']
 EVENT_LIST_FILE = param['EVENT_LIST_FILE']
+TELESCOP = param['TELESCOP']
+INSTRUME = param['INSTRUME']
+DETNAM = param['DETNAM']
 # ============================
 
 """
@@ -101,7 +104,7 @@ DEGRADATION_NORM = 9.22 # percent
 RESP_FILENAME = 'cogamo_fy2020.rsp'
 """
 
-product_dir = '%s_prod' % os.path.splitext(RESP_FILENAME)[0]
+product_dir = '%s_product' % os.path.splitext(RESP_FILENAME)[0]
 cmd = 'rm -rf %s; mkdir -p %s' % (product_dir,product_dir) 
 os.system(cmd)
 
@@ -292,10 +295,10 @@ for hdu in hdulist:
 	hdu.header['HDUDOC']  = ('OGIP memos CAL/GEN/92-002 & 92-002a','Documents describing the forma')
 	hdu.header['RMFVERSN'] = ('1992a   ','Obsolete - included for backwards compatibility')	
 
-	hdu.header['TELESCOP'] = ('thdr','mission/satellite name')
-	hdu.header['INSTRUME'] = ('cogamo2020','instrument/detector name')
+	hdu.header['TELESCOP'] = (TELESCOP,'mission/satellite name')
+	hdu.header['INSTRUME'] = (INSTRUME,'instrument/detector name')
+	hdu.header['DETNAM'] = (DETNAM,'detector in use')
 	hdu.header['FILTER'] = ('','filter in use')
-	hdu.header['DETNAM'] = ('CsI(Tl):50x50x150mm3','detector in use')
 	hdu.header['DETCHANS'] = (detchans,'total number of detector channels')	
 	hdu.header['CHANTYPE'] = ('PI','WARNING This is NOT an OGIP-approved value')	
 	hdu.header['TLMIN1'] = (channel_array[0],'Minimum value legally allowed in column 1')	
