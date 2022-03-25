@@ -728,6 +728,7 @@ class EventData():
 		self.filepath = filepath
 		self.filename = os.path.basename(self.filepath)
 		self.basename = os.path.splitext(self.filename)[0]
+		sys.stdout.write('filepath: %s\n' % self.filepath)
 
 		self.param = {}
 		self.pdflist = []
@@ -743,9 +744,15 @@ class EventData():
 			self.detid_str, self.yyyymmdd_jst, self.hour_jst = self.basename.split("_")		
 			self.year = self.yyyymmdd_jst[0:4]
 			self.month = self.yyyymmdd_jst[4:6]
+			self.day = self.yyyymmdd_jst[6:8]		
+		elif re.match(r'\d{3}_\d{8}_\d{2}', self.filename):
+			self.filetype = 'rawcsv'
+			self.detid_str, self.yyyymmdd_jst, self.hour_jst, self.note = self.basename.split("_")		
+			self.year = self.yyyymmdd_jst[0:4]
+			self.month = self.yyyymmdd_jst[4:6]
 			self.day = self.yyyymmdd_jst[6:8]			
 		else:
-			sys.stdout.write("[error] filetype error...")
+			sys.stdout.write("[error] filetype error... at %s\n" % sys._getframe().f_code.co_name)
 			return -1
 
 	def open_file(self):
@@ -758,7 +765,7 @@ class EventData():
 					dtype={'minute':np.uintc,'sec':np.uintc,'decisec':np.uint16,'pha':np.uint16})
 				self.nevents = len(self.df)
 			else:
-				sys.stdout.write("[error] filetype error...")
+				sys.stdout.write("[error] filetype error... at %s\n" % sys._getframe().f_code.co_name)
 				return -1
 		except OSError as e:
 			raise
@@ -795,11 +802,11 @@ class EventData():
 		self.pdflist.append(outpdf)
 		return outpdf
 
-	def prepare_energy_calibration(self):
+	def prepare_energy_calibration(self,dict_gamma_lines=GAMMA_LINES):
 		self.line_MeV = []
 		self.line_pha = []
 		self.line_pha_err = []
-		for dict_line in GAMMA_LINES:
+		for dict_line in dict_gamma_lines:
 			print(dict_line)
 			par = self.fit_phaspec_line(
 				pha_min=dict_line['pha_min'],
@@ -837,6 +844,8 @@ class EventData():
 		model_x = phaspec.x
 		model_y = np.array([model_gauss_linear(x,peak=par['peak'],sigma=par['sigma'],area=par['area'],c0=par['c0'],c1=par['c1']) for x in model_x])	
 
+		if not hasattr(self,'outdir'):
+			self.outdir = './'
 		if name is None:
 			legend_text = 'line fit'
 			outpdf = '%s/%s_linefit.pdf' % (self.outdir,self.basename)
@@ -865,7 +874,8 @@ class EventData():
 		if name is not None:
 			self.param[name] = par
 
-		self.pdflist.append(outpdf)	
+		if hasattr(self, 'pdflist'):
+			self.pdflist.append(outpdf)	
 		return par 	
 
 	def get_pha2mev_param(self,mev_array,pha_array,pha_err_array):
@@ -918,14 +928,19 @@ class EventData():
 		self.time_offset_utc = time_offset_jst - timedelta(hours=+9)		
 		self.unixtime_offset = self.time_offset_utc.to_value('unix',subfmt='decimal')
 
-	def set_energy_series(self):		
+	def set_energy_series(self,pha2mev_c1=None,pha2mev_c0=None):		
 		""" with rand  
 		"""
 		sys.stdout.write('----- {} -----\n'.format(sys._getframe().f_code.co_name))
 
 		rand_series = np.random.random_sample(len(self.df['pha']))
 		rand_pha = self.df['pha'].astype(np.float32) + rand_series - 0.5 
-		self.df['energy_mev'] = self.pha2mev_c1 * rand_pha + self.pha2mev_c0
+		if pha2mev_c1 is None:
+			pha2mev_c1 = self.pha2mev_c1
+		if pha2mev_c0 is None:
+			pha2mev_c0 = self.pha2mev_c0
+		self.df['energy_mev'] = pha2mev_c1 * rand_pha + pha2mev_c0
+		#self.df['energy_mev'] = self.pha2mev_c1 * rand_pha + self.pha2mev_c0
 
 	def extract_energy_spectrum(self,
 			nbins=2**10,energy_min=0.0,energy_max=12.0,

@@ -23,8 +23,8 @@ Plot a raw csv-format CoGaMo house keeping data.
 	version = '%(prog)s ' + __version__
 	parser.add_argument('--version', '-v', action='version', version=version,
 		help='show version of this command.')
-	parser.add_argument('input_hkfile', type=str, 
-		help='input rawcsv hk file.')
+	parser.add_argument('input_eventfile', type=str, 
+		help='input rawcsv event file.')
 	parser.add_argument('-o','--output_pdf', type=str, 
 		help='output pdf file.', default=None)	
 	return parser
