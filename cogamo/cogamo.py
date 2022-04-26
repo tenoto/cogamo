@@ -31,12 +31,13 @@ MAX_PHA_CHANNEL = 2**10 - 1
 
 FIT_RETRY = 2
 
-#DICT_INITPAR_K40 = {'name':'K40','MeV':1.46083,'peak':132,'sigma':5,'area':18025,'c0':3731,'c1':-21.0,'pha_min':100,'pha_max':164,'binning':2,'xlim':[100,164]}
-DICT_INITPAR_K40 = {'name':'K40','MeV':1.46083,'peak':132,'sigma':5,'area':18025,'c0':3731,'c1':-21.0,'pha_min':100,'pha_max':184,'binning':2,'xlim':[100,184]}
-#DICT_INITPAR_TL208 = {'name':'Tl208','MeV':2.61453,'peak':236,'sigma':7,'area':2651,'c0':798.0,'c1':-3,'pha_min':190,'pha_max':284,'binning':2,'xlim':[190,284],}
-#DICT_INITPAR_TL208 = {'name':'Tl208','MeV':2.61453,'peak':250,'sigma':7,'area':2651,'c0':798.0,'c1':-3,'pha_min':210,'pha_max':300,'binning':2,'xlim':[210,300],}
-DICT_INITPAR_TL208 = {'name':'Tl208','MeV':2.61453,'peak':220,'sigma':7,'area':2651,'c0':798.0,'c1':-3,'pha_min':190,'pha_max':284,'binning':2,'xlim':[190,284],}
-GAMMA_LINES = [DICT_INITPAR_K40,DICT_INITPAR_TL208]
+#DICT_INITPAR_K40 = {'name':'K40','MeV':1.46083,'peak':132,'sigma':5,'area':18025,'c0':3731,'c1':-21.0,'pha_min':100,'pha_max':184,'binning':2,'xlim':[100,184]}
+#DICT_INITPAR_TL208 = {'name':'Tl208','MeV':2.61453,'peak':220,'sigma':7,'area':2651,'c0':798.0,'c1':-3,'pha_min':190,'pha_max':284,'binning':2,'xlim':[190,284],}
+#GAMMA_LINES = [DICT_INITPAR_K40,DICT_INITPAR_TL208]
+
+df_Tl208 = pd.read_excel('%s/setenv/energy_calibration_setup.xlsx' % os.getenv('COGAMO_PATH'),sheet_name='Tl208',engine='openpyxl')
+df_K40 = pd.read_excel('%s/setenv/energy_calibration_setup.xlsx' % os.getenv('COGAMO_PATH'),sheet_name='K40',engine='openpyxl')
+ENERGY_CALIBRATION_SETUP = [df_Tl208,df_K40]
 
 RESPFILE = '%s/cogamo/response/cogamo_fy2020_flat.rsp' % os.getenv('COGAMO_PATH')
 
@@ -148,7 +149,7 @@ def fit_xspec(src_pha,bgd_pha,resp,outdir,basename,
 	dump += "200      -0.1          0          0      1e+06      1e+06\n"
 	dump += "20000    -0.1          0          0      1e+06      1e+06\n"
 	dump += "-6       0.01       -100       -100        100        100\n"
-	dump += "0.3      0.01        -10		 -10         10         10\n"
+	dump += "1.4      0.01        -10		 -10         10         10\n"
 	dump += "4.0      0.01       0.01        0.01       100        100\n"
 	dump += "1         -1      1e-22      1e-22      1e+22      1e+22\n"
 	dump += "1         -1          0          0      1e+20      1e+24\n"
@@ -170,6 +171,7 @@ def fit_xspec(src_pha,bgd_pha,resp,outdir,basename,
 	cmd += 'ignore **-%.1f,%.1f-**\n' % (emin_mev,emax_mev)
 	cmd += 'systematic %.4f\n' % systematic
 	cmd += 'query yes\n'
+	cmd += 'renorm\n'
 	cmd += 'fit\n'			
 	cmd += 'save all %s\n' % fxcm
 	cmd += 'iplot ld del\n'
@@ -221,7 +223,7 @@ def fit_xspec(src_pha,bgd_pha,resp,outdir,basename,
 	band2_flag = False	
 	for line in open(flog):
 		cols = line.split()
-		print(band1_flag,band2_flag,cols)
+		print(error_ready,band1_flag,band2_flag,cols)
 		if not len(cols) > 2:
 			continue 
 		if 'Confidence' in cols:
@@ -802,30 +804,33 @@ class EventData():
 		self.pdflist.append(outpdf)
 		return outpdf
 
-	def prepare_energy_calibration(self,dict_gamma_lines=GAMMA_LINES):
+	def prepare_energy_calibration(self):
 		self.line_MeV = []
 		self.line_pha = []
 		self.line_pha_err = []
-		for dict_line in dict_gamma_lines:
-			print(dict_line)
+		for df_line in ENERGY_CALIBRATION_SETUP:
+			if int(self.detid_str) in df_line["id"].values:
+				line_init = df_line[df_line["id"] == int(self.detid_str)]
+			else:
+				line_init = df_line[df_line["id"] == 0]		
 			par = self.fit_phaspec_line(
-				pha_min=dict_line['pha_min'],
-				pha_max=dict_line['pha_max'],
-				binning=dict_line['binning'],
-				peak=dict_line['peak'],
-				sigma=dict_line['sigma'],
-				area=dict_line['area'],
-				c0=dict_line['c0'],
-				c1=dict_line['c1'],
-				name=dict_line['name'],
-				MeV=dict_line['MeV'],	
+				pha_min=float(line_init['pha_min']),
+				pha_max=float(line_init['pha_max']),
+				binning=int(line_init['binning']),
+				peak=float(line_init['peak']),
+				sigma=float(line_init['sigma']),
+				area=float(line_init['area']),
+				c0=float(line_init['c0']),
+				c1=float(line_init['c1']),
+				name=str(line_init['name'].values[0]),
+				MeV=float(line_init['MeV']),	
 				flag_hist=False)	
-			self.line_MeV.append(dict_line['MeV'])
+			self.line_MeV.append(float(line_init['MeV']))
 			self.line_pha.append(par['peak'])
 			self.line_pha_err.append(par['peak_err'])
 		self.get_pha2mev_param(
 			np.array(self.line_MeV),
-			np.array(self.line_pha),np.array(self.line_pha_err))		
+			np.array(self.line_pha),np.array(self.line_pha_err))	
 
 	def fit_phaspec_line(self,
 			pha_min=202,pha_max=265,binning=2,
@@ -1399,7 +1404,7 @@ class EventData():
 				resp=RESPFILE,
 				outdir=self.outdir,
 				basename='%s_bst%02d' % (self.basename,bst.param["burst_id"]),
-				emin_mev=0.2,emax_mev=40.1,
+				emin_mev=0.3,emax_mev=20.,
 				title=title)
 			for keyword in fit_param:
 				bst.param[keyword] = fit_param[keyword]
