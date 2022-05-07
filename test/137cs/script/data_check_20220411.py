@@ -1,10 +1,11 @@
 #!/usr/bin/env python
 
 import os 
-datadir = '/Users/enoto/Dropbox/01_enoto/research/growth/logbook/220310_Cogamo_response/data/miwa/20220323/'
 
-outdir = 'outdir'
-cmd = 'rm -rf %s;mkdir -p %s' % (outdir,outdir)
+datadir = '/Users/enoto/Dropbox/01_enoto/research/growth/logbook/220310_Cogamo_response/data/miwa/20220411/'
+
+outdir = 'outdir/data_20220411'
+os.system('mv *.pdf *.yaml %s/' % outdir)
 
 ## plot curve 
 cmd = '$COGAMO_PATH/cogamo/cli/cgm_plot_curve.py '
@@ -37,3 +38,5 @@ print(cmd);os.system(cmd)
 cmd = '$COGAMO_PATH/cogamo/cli/cgm_fit_phaspec_line.py '
 cmd += '%s/032_20211215_15_137Cs.csv ' % datadir
 print(cmd);os.system(cmd)
+
+os.system('mv *.pdf *.yaml %s/' % outdir)
