@@ -4,7 +4,8 @@ import cogamo.cogamo as cogamo
 
 outdir = 'out'
 
-evt = cogamo.EventData('../data/event/id056/056_20211219_14.csv')
+evt = cogamo.EventData('../data/event/id014/014_20211219_14.csv')
+#evt = cogamo.EventData('../data/event/id056/056_20211219_14.csv')
 #evt = cogamo.EventData('../data/event/id056/056_20211219_00.csv') # low bgd, non detection 
 outdir = '%s/product/id%s/%s/%s/%s/%s' % (outdir,evt.detid_str, evt.year, evt.month, evt.day, evt.hour_jst)
 
