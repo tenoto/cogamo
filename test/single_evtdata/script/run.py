@@ -14,7 +14,9 @@ outdir = 'out'
 #evt = cogamo.EventData('../data/056_20211219_14.csv')
 #evt = cogamo.EventData('../data/event/id016/016_20210108_06.csv')
 #evt = cogamo.EventData('../data/event/id014/014_20210109_06.csv')
-evt = cogamo.EventData('../data/event/id012/012_20210109_06.csv')
+#evt = cogamo.EventData('../data/event/id012/012_20210109_06.csv')
+#evt = cogamo.EventData('../data/event/id012/012_20210109_05.csv')
+evt = cogamo.EventData('../data/event/id014/014_20210109_05.csv')
 
 outdir = '%s/product/id%s/%s/%s/%s/%s' % (outdir,evt.detid_str, evt.year, evt.month, evt.day, evt.hour_jst)
 evt.run_process(outdir,lc_binning=2.0,threshold_sigma=5.0)
