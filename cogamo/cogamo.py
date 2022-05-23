@@ -1575,6 +1575,25 @@ class EventData():
 
 		return outpdf 
 
+	def run_process(self,outdir,lc_binning=2.0,threshold_sigma=5.0):
+		sys.stdout.write('----- {} -----\n'.format(sys._getframe().f_code.co_name))		
+		self.set_outdir(outdir)
+		self.extract_pha_spectrum(binning=lc_binning)
+		self.prepare_energy_calibration()
+		self.set_energy_series()
+		self.set_time_series()
+		self.plot_multi_curves()
+		self.extract_energy_spectrum()
+		lc = self.extract_curve()
+		self.search_burst(lc,threshold_sigma=threshold_sigma)
+		if self.numof_bst > 0:
+			self.analysis_bursts()
+		self.show_summary()
+		self.write_to_fitsfile()
+		self.write_to_yamlfile()	
+		self.pdfmerge()
+		print(self.param)
+
 class Burst():
 	def __init__(self,eventdata,burst_id,gti_start,gti_stop,catalog=None):
 		self.param = {}
