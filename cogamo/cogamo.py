@@ -336,6 +336,10 @@ class Hist1D(object):
 		self.y += y
 		self.yerr = np.sqrt(self.y)
 
+	def multiply_factor(self,factor):
+		self.y = self.y * factor
+		self.yerr = self.yerr * factor
+
 	@property
 	def data(self):
 		return self.x, self.y
@@ -345,6 +349,7 @@ class Hist1D(object):
 		flax_xerr=False,flag_yerr=False,
 		flag_xlog=False,flag_ylog=False,
 		xlim=None,
+		ylim=None,
 		mask=None,
 		axvline_values=None,axvline_legends=None,
 		axhline_values=None,axhline_legends=None,
@@ -372,7 +377,8 @@ class Hist1D(object):
 		if flag_xlog: plt.xscale('log')				
 		if flag_ylog: plt.yscale('log')
 		if xlim is not None: plt.xlim(xlim)
-		
+		if ylim is not None: plt.ylim(ylim)		
+
 		ax.minorticks_on()
 		ax.grid(True)
 		ax.grid(axis='both',which='major', linestyle='--', color='#000000')
@@ -396,7 +402,8 @@ class Hist1D(object):
 				for value in axhline_values:
 					ax.axhline(value,ls='-.')				
 
-		legend = ax.legend(title=legend_title,loc=legend_loc,fontsize=legend_fontsize)
+		if legend_title != "":
+			legend = ax.legend(title=legend_title,loc=legend_loc,fontsize=legend_fontsize)
 
 		plt.tick_params(labelsize=fontsize)
 		plt.rcParams["font.family"] = "serif"
@@ -617,14 +624,28 @@ class PhaSpectrum(Hist1D):
 		super().__init__(nbins, self.pha_min-0.5, self.pha_max-0.5)	
 		self.fill(pha_series)
 
-	def write(self,outpdf,title='',xlim=[0,1023]):
-		self.plot(outpdf,
-			xlabel='ADC channel (pha)',
-			ylabel='Counts / bin',
-			title=title,
-			flag_yerr=True,
-			flag_xlog=False,flag_ylog=True,
-			xlim=xlim)
+	def write(self,outpdf,title='',xlim=[0,1023],ylim=None,exposure=0.0):
+		"""
+		if exposure == 0, the raw count rate,
+		if exposure > 0, the spectrum is divided by the exposure 
+		"""
+		if exposure == 0.0:
+			self.plot(outpdf,
+				xlabel='ADC channel (pha)',
+				ylabel='Counts / bin',
+				title=title,
+				flag_yerr=True,
+				flag_xlog=False,flag_ylog=True,
+				xlim=xlim,ylim=ylim)
+		elif exposure > 0.0:
+			self.multiply_factor(1.0/exposure)
+			self.plot(outpdf,
+				xlabel='ADC channel (pha)',
+				ylabel='Counts / bin / sec',
+				title=title,
+				flag_yerr=True,
+				flag_xlog=False,flag_ylog=True,
+				xlim=xlim,ylim=ylim)			
 
 class EnergySpectrum(Hist1D):
 	def __init__(self, energy_series, nbins, energy_min, energy_max):
