@@ -1,9 +1,9 @@
 #EVENT_LIST_FILE: '/Users/enoto/Box/Ext_101244_Extreme Natural Phenomena RIKEN Hakubi Research Team/Ext_GROWTH/ThunderCloudProject/検出器レスポンス/20220411_Gabriel_response/Response_function_data/CsI5x15x5cm3_Al2000umCoated_Isotropic_Air_662keV.txt'
 EVENT_LIST_FILE: 'Response_function_data/CsI5x15x5cm3_Al2000umCoated_FlatRadiation.txt'
-RESP_FILENAME: 'product/CsI5x15x5cm3_Al2000umCoated_FlatRadiation.rsp'
-TELESCOP: "thcdproj"
-INSTRUME: "cogamo20"
-DETNAM: "csi5x15_Flat"  
+RESP_FILENAME: 'CsI5x15x5cm3_Al2000umCoated_FlatRadiation.rsp'
+TELESCOP: "ThunderCloud"
+INSTRUME: "CogamoFY2020"
+DETNAM: "CsI5x15_Flat"  
 PARAM_EDGES_INITIAL_ENERGY: [[40,400,5],[400,1200,10],[1200,3000,20],[3000,8000,40],[8000,20000,100],[20000,41200,200]]
 PARAM_EDGES_DEPOSIT_ENERGY: [40,41000,20] 
 SURFACE_AREA: 75 # cm2 (5x15)
