@@ -1844,9 +1844,10 @@ class HKData():
 	12. humidity (%)
 	13. the maximum value among the difference of 10-sec moving average of count rates to the latest count rates (10秒移動平均とCPS値との差の最大値:定義を確認する必要がある) 
 	14. optical illumination (lux)
-	15. gps status (0:invalid, 1 or 2: valid)
-	16. longitude (deg)
-	17. latitude (deg)
+	15. n/a
+	16. gps status (0:invalid, 1 or 2: valid)
+	17. longitude (deg)
+	18. latitude (deg)
 	"""
 	def __init__(self, filepath):	
 		self.filetype = None		
@@ -1876,11 +1877,19 @@ class HKData():
 		if not os.path.exists(self.filepath):
 			raise FileNotFoundError("{} not found".format(self.filepath))
 		try:
+			#cmd = ' nkf -w --overwrite %s' % self.filepath
+			#print(cmd);os.system(cmd)
+
 			if self.filetype == 'rawcsv':
-				self.df = pd.read_csv(self.filepath, index_col=False, error_bad_lines=False, 
+				self.df = pd.read_csv(self.filepath, index_col=False, on_bad_lines='skip', encoding='utf-8',
 					names=['yyyymmdd','hhmmss','interval','rate1','rate2','rate3','rate4','rate5','rate6','temperature','pressure','humidity','differential','lux','n/a','gps_status','longitude','latitude'],
 					dtype={})
 				self.nevents = len(self.df)
+
+				# sometimes two lines are collapsed. This process excludes these lines. 
+				flag = pd.to_numeric(self.df['latitude'],errors='coerce').isnull()
+				self.df = self.df[~flag]
+
 			else:
 				sys.stdout.write("[error] filetype error...")
 				return -1
@@ -1893,21 +1902,21 @@ class HKData():
 
 		sys.stdout.write('----- {} -----\n'.format(sys._getframe().f_code.co_name))
 
-		time_series_str = np.char.array(self.df['yyyymmdd'] + 'T' + self.df['hhmmss'])
-		time_series_jst = Time(time_series_str, format='isot', scale='utc', precision=5) 	
-		time_series_utc = time_series_jst - timedelta(hours=+9)		
-		self.df['unixtime'] = time_series_utc.to_value('unix',subfmt='decimal')
+		tmp_time_series_str = np.char.array(self.df['yyyymmdd'] + 'T' + self.df['hhmmss'])
+		tmp_time_series_jst = Time(tmp_time_series_str, format='isot', scale='utc', precision=5) 	
+		tmp_time_series_utc = tmp_time_series_jst - timedelta(hours=+9)		
+		self.df['unixtime'] = tmp_time_series_utc.to_value('unix',subfmt='decimal')
 		self.df['unixtime'] = self.df['unixtime'].astype(np.float64)
 
-	def plot(self,outpdf):
+	def plot(self,outpdf,tstart=None,tstop=None,ylog=0):
 		sys.stdout.write('----- {} -----\n'.format(sys._getframe().f_code.co_name))		
 		time_series_utc = Time(self.df['unixtime'],format='unix',scale='utc')
 		time_series_jst = time_series_utc.to_datetime(timezone=tz_tokyo)
 		plt.rcParams['timezone'] = 'Asia/Tokyo'
 
 		title  = 'DET_ID=%s ' % self.detid_str
-		title += '(Longitude=%.3f deg, ' % (np.mean(self.df['longitude']))
-		title += 'Latitude=%.3f deg)' % (np.mean(self.df['latitude']))		
+		title += '(Longitude=%.3f deg, ' % (np.mean(pd.to_numeric(self.df['latitude'],errors='coerce')))
+		title += 'Latitude=%.3f deg)' % (np.mean(pd.to_numeric(self.df['longitude'],errors='coerce')))		
 		title += '\n'
 		title += '%s ' % str(time_series_jst[0])[0:10]
 		title += 'Interval=%d sec ' % (self.df['interval'][0])
@@ -1921,6 +1930,19 @@ class HKData():
 		title += 'Rate M (3+4):1-3 MeV, '
 		title += 'Rate H (5+6):>3 MeV '
 
+		if tstart is not None and tstop is not None:
+			tmp_tstart_jst = Time(tstart, format='isot', scale='utc', precision=5) 	
+			tmp_tstart_utc = tmp_tstart_jst - timedelta(hours=+9)		
+			tstart_jst = tmp_tstart_utc.to_datetime(timezone=tz_tokyo)
+
+			tmp_tstop_jst = Time(tstop, format='isot', scale='utc', precision=5) 	
+			tmp_tstop_utc = tmp_tstop_jst - timedelta(hours=+9)		
+			tstop_jst = tmp_tstop_utc.to_datetime(timezone=tz_tokyo)		
+
+			flag = np.logical_and(time_series_jst >= tstart_jst,time_series_jst <= tstop_jst)
+			time_series_jst = time_series_jst[flag]				
+			self.df = self.df[flag]
+
 		# color https://matplotlib.org/stable/tutorials/colors/colors.html
 		fig, axs = plt.subplots(8,1, figsize=(8.27,11.69), 
 			sharex=True, gridspec_kw={'hspace': 0})
@@ -1930,16 +1952,19 @@ class HKData():
 			'-', c='salmon',mec='k', markersize=2,where='mid')
 		axs[0].set_ylabel(r"Rate L (cps)")
 		axs[0].set_title(title)	
+		if ylog == 1: axs[0].set_yscale('log')
 		axs[1].step(
 			time_series_jst,
 			self.df['rate3']+self.df['rate4'],
 			'-', c='tomato',mec='k', markersize=2,where='mid')
 		axs[1].set_ylabel(r"Rate M (cps)")	
+		if ylog == 1: axs[1].set_yscale('log')		
 		axs[2].step(
 			time_series_jst,
 			self.df['rate5']+self.df['rate6'],
 			'-',c='red',mec='k', markersize=2,where='mid')
 		axs[2].set_ylabel(r"Rate H (cps)")				
+		if ylog == 1: axs[2].set_yscale('log')				
 		axs[3].step(time_series_jst,self.df['temperature'],
 			'-',c='k',where='mid')
 		axs[3].set_ylabel(r"Temp. (degC)")
@@ -1962,8 +1987,18 @@ class HKData():
 		axs[7].set_xlabel(r"Time (JST)")
 		axs[7].set_ylim(-0.5,2.5)
 		axs[7].xaxis.set_major_formatter(dates.DateFormatter('%m-%d\n%H:%M'))
-		
-		axs[7].set_xlim(time_series_jst[0],time_series_jst[-1])
+
+		if tstart is not None and tstop is not None:
+			tmp_tstart_jst = Time(tstart, format='isot', scale='utc', precision=5) 	
+			tmp_tstart_utc = tmp_tstart_jst - timedelta(hours=+9)		
+			tstart_jst = tmp_tstart_utc.to_datetime(timezone=tz_tokyo)
+			tmp_tstop_jst = Time(tstop, format='isot', scale='utc', precision=5) 	
+			tmp_tstop_utc = tmp_tstop_jst - timedelta(hours=+9)		
+			tstop_jst = tmp_tstop_utc.to_datetime(timezone=tz_tokyo)
+			axs[7].set_xlim(tstart_jst,tstop_jst)
+		else:
+			axs[7].set_xlim(time_series_jst[0],time_series_jst[-1])
+
 		for ax in axs:
 			ax.label_outer()	
 			ax.minorticks_on()

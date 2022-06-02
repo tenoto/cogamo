@@ -27,6 +27,12 @@ Plot a raw csv-format CoGaMo house keeping data.
 		help='input rawcsv event file.')
 	parser.add_argument('-o','--output_pdf', type=str, 
 		help='output pdf file.', default=None)	
+	parser.add_argument('--tstart', type=str, 
+		help='tstart time (2022-05-30T17:30:00)', default=None)		
+	parser.add_argument('--tstop', type=str, 
+		help='tstop time (2022-05-30T21:30:00)', default=None)		
+	parser.add_argument('--ylog', type=int, 
+		help='ylog for the rate (1:log, 0:linear)', default=0)		
 	return parser
 
 def main(args=None):
@@ -37,7 +43,7 @@ def main(args=None):
 	if args.output_pdf == None:
 		args.output_pdf = '%s_hk.pdf' % os.path.splitext(os.path.basename(args.input_hkfile))[0]
 	hkdata = cogamo.HKData(args.input_hkfile)
-	hkdata.plot(args.output_pdf)
+	hkdata.plot(args.output_pdf,tstart=args.tstart,tstop=args.tstop,ylog=args.ylog)
 
 if __name__=="__main__":
 	main()
