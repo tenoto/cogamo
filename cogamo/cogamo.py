@@ -1877,8 +1877,8 @@ class HKData():
 			raise FileNotFoundError("{} not found".format(self.filepath))
 		try:
 			if self.filetype == 'rawcsv':
-				self.df = pd.read_csv(self.filepath, index_col=False, 
-					names=['yyyymmdd','hhmmss','interval','rate1','rate2','rate3','rate4','rate5','rate6','temperature','pressure','humidity','differential','lux','gps_status','longitude','latitude'],
+				self.df = pd.read_csv(self.filepath, index_col=False, error_bad_lines=False, 
+					names=['yyyymmdd','hhmmss','interval','rate1','rate2','rate3','rate4','rate5','rate6','temperature','pressure','humidity','differential','lux','n/a','gps_status','longitude','latitude'],
 					dtype={})
 				self.nevents = len(self.df)
 			else:
@@ -1910,7 +1910,7 @@ class HKData():
 		title += 'Latitude=%.3f deg)' % (np.mean(self.df['latitude']))		
 		title += '\n'
 		title += '%s ' % str(time_series_jst[0])[0:10]
-		title += 'Interval=%d min ' % (self.df['interval'][0])
+		title += 'Interval=%d sec ' % (self.df['interval'][0])
 		title += '(%s)' % self.filename
 		title += '\n'		
 		#if self.hdu['HK'].header['AREABD2'] > 0.0:
